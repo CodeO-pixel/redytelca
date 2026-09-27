@@ -1,0 +1,45 @@
+services:
+  app:
+    build:
+      context: .
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    ports:
+      - "8080:80"
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:-redytelca}
+      DB_USER: ${DB_USER:-redytelca}
+      DB_PASS: ${DB_PASS:-redytelca_pass}
+      # Orígenes permitidos para CORS (conexion.php). Ajusta si accedes
+      # desde otro host/puerto que no sea localhost:8080.
+      REDYTELCA_ALLOWED_ORIGINS: "http://localhost:8080,http://127.0.0.1:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-redytelca}
+      MYSQL_USER: ${DB_USER:-redytelca}
+      MYSQL_PASSWORD: ${DB_PASS:-redytelca_pass}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS:-root_pass}
+    # bd_redytelca.sql ya trae el esquema completo (incluye las tablas RBAC:
+    # rol, permissions, role_permission, rol_modulo_pagina, sesiones, etc.),
+    # así que basta con importarlo una vez al crear el contenedor.
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./bd_redytelca.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASS:-root_pass}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  db_data:
