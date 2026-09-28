@@ -114,7 +114,7 @@ INSERT INTO `contratos` (`id_contrato`, `id_servicio`, `fecha_inicio`, `fecha_fi
 (2, 4, '2026-07-11', '2026-08-11', 'plazo_fijo', 'vigente', 'mondongo', '2026-07-11 21:03:08'),
 (10, 10, '2026-01-01', NULL, 'indefinido', 'vigente', 'Contrato estándar', '2026-07-20 16:49:51'),
 (11, 11, '2026-02-01', '2026-12-31', 'plazo_fijo', 'vigente', 'Contrato anual', '2026-07-20 16:49:51'),
-(12, 12, '2026-03-01', NULL, 'indefinido', 'vencido', 'Expirado por falta de pago', '2026-07-20 16:49:51');
+(12, 13, '2026-03-01', NULL, 'indefinido', 'vencido', 'Expirado por falta de pago', '2026-07-20 16:49:51');
 
 -- --------------------------------------------------------
 
@@ -141,7 +141,7 @@ CREATE TABLE `equipos` (
 
 INSERT INTO `equipos` (`id_equipo`, `tipo`, `marca`, `modelo`, `direccion_mac`, `num_puerto_nap`, `estado_fisico`, `id_naps`, `id_servicio`, `propiedad`) VALUES
 (10, 'ONT', 'Huawei', 'HG8245', 'AA:BB:CC:DD:EE:10', 1, 'operativo', 10, 10, 'cliente'),
-(11, 'ROUTER', 'Mikrotik', 'hAP ac2', 'AA:BB:CC:DD:EE:11', 2, 'operativo', 10, 11, 'empresa'),
+(11, 'ROUTER', 'Mikrotik', 'hAP ac2', 'AA:BB:CC:DD:EE:11', 2, 'operativo', 12, 11, 'empresa'),
 (12, 'ONU', 'ZTE', 'F670L', 'AA:BB:CC:DD:EE:12', 1, 'stock', 12, NULL, 'empresa');
 
 -- --------------------------------------------------------
@@ -169,7 +169,8 @@ INSERT INTO `facturas` (`id_factura`, `id_servicio`, `periodo`, `monto`, `fecha_
 (10, 10, '2026-06', 15.00, '2026-06-01', '2026-06-20', 'pagada', '2026-07-20 16:49:51'),
 (11, 10, '2026-07', 15.00, '2026-07-01', '2026-07-20', 'vencida', '2026-07-20 16:49:51'),
 (12, 11, '2026-07', 45.00, '2026-07-01', '2026-07-25', 'pendiente', '2026-07-20 16:49:51'),
-(13, 12, '2026-06', 30.00, '2026-06-01', '2026-06-20', 'pagada', '2026-07-20 16:49:51');
+(13, 12, '2026-06', 30.00, '2026-06-01', '2026-06-20', 'pagada', '2026-07-20 16:49:51'),
+(14, 13, '2026-07', 15.00, '2026-07-01', '2026-07-20', 'vencida', '2026-07-20 16:49:51');
 
 -- --------------------------------------------------------
 
@@ -232,9 +233,9 @@ CREATE TABLE `naps` (
 
 INSERT INTO `naps` (`id_nap`, `codigo`, `cantidad_puertos_max`, `ubicacion_fisica`, `latitud`, `longitud`, `id_olts`) VALUES
 (1, 'NAP-01', 16, 'Calle Principal', 10.48200000, -66.90500000, 1),
-(10, 'NAP-10', 16, 'Ubicación Física 1', 0.00000000, 0.00000000, 10),
-(11, 'NAP-11', 8, 'Ubicación Física 2', 0.00000000, 0.00000000, 10),
-(12, 'NAP-12', 16, 'Ubicación Física 3', 0.00000000, 0.00000000, 11);
+(10, 'NAP-10', 16, 'Urbanización Norte, poste 1', 10.51100000, -66.90800000, 10),
+(11, 'NAP-11', 8, 'Urbanización Norte, poste 2', 10.51300000, -66.91200000, 10),
+(12, 'NAP-12', 16, 'Urbanización Sur, poste 1', 10.45600000, -66.89400000, 11);
 
 -- --------------------------------------------------------
 
@@ -257,8 +258,8 @@ CREATE TABLE `nodos` (
 
 INSERT INTO `nodos` (`id_nodo`, `nombre`, `ubicacion`, `latitud`, `longitud`, `estado`) VALUES
 (1, 'Nodo Centro', 'Sector Centro', 10.48060000, -66.90360000, 'activo'),
-(10, 'Nodo Norte', 'Ubicación prueba 1', 0.00000000, 0.00000000, 'activo'),
-(11, 'Nodo Sur', 'Ubicación prueba 2', 0.00000000, 0.00000000, 'activo');
+(10, 'Nodo Norte', 'Sector Norte', 10.51200000, -66.91000000, 'activo'),
+(11, 'Nodo Sur', 'Sector Sur', 10.45500000, -66.89500000, 'activo');
 
 -- --------------------------------------------------------
 
@@ -535,7 +536,7 @@ CREATE TABLE `servicios` (
 
 INSERT INTO `servicios` (`id_servicio`, `id_cliente`, `alias`, `estado_comercial`, `id_plan`, `id_naps`, `direccion_texto`, `latitud_instalacion`, `longitud_instalacion`) VALUES
 (1, 1, NULL, 'activo', 1, 1, 'San Francisco, calle 4', 10.48006000, -66.90300000),
-(4, 1, 'casa principal', 'activo', 2, 1, 'san francisco al lado del otro servicio', 10.20399400, 66.90300000),
+(4, 1, 'casa principal', 'activo', 2, 1, 'san francisco al lado del otro servicio', 10.48010000, -66.90310000),
 (10, 10, 'Servicio Casa 1', 'activo', 1, 10, 'Dir prueba 1', NULL, NULL),
 (11, 10, 'Servicio Oficina', 'activo', 10, 12, 'Dir prueba 2', NULL, NULL),
 (12, 11, 'Servicio Hogar', 'activo', 2, 10, 'Dir prueba 3', NULL, NULL),
@@ -561,15 +562,6 @@ CREATE TABLE `sesiones` (
 -- Dumping data for table `sesiones`
 --
 
-INSERT INTO `sesiones` (`id_sesion`, `token`, `tipo_usuario`, `id_usuario`, `id_credencial`, `creado_en`, `expira_en`) VALUES
-(29, 'a03998d411b5b27adca1759c9017e6b6f490d831abdfe3c12e9148f83a82cfae', 'staff', 2, NULL, '2026-07-19 19:25:22', '2026-08-18 21:25:22'),
-(64, 'c9d9a1fb58d09726589fd50c25f2a3ed894a6ce096f242e278344ad04ebe2c51', 'staff', 1, NULL, '2026-07-20 23:11:20', '2026-08-20 01:11:20'),
-(65, '7bcf4c3d605bb0396e8f47e1b29aed55e6dfd6650f46aa730d63919068394205', 'staff', 1, NULL, '2026-07-20 23:11:20', '2026-08-20 01:11:20'),
-(66, '51df69836ef4952eb45438ef0b06f9dc629a1b986ef57ff7537ab0937804ff85', 'staff', 1, NULL, '2026-07-20 23:23:57', '2026-08-20 01:23:57'),
-(67, '8da54fe60009ed21c7abb62faf2f6b809ecc2add8e5c58b58bbdfe0af09a9702', 'staff', 1, NULL, '2026-07-20 23:23:57', '2026-08-20 01:23:57'),
-(68, 'dbf45925a9780194b6de65c1a79f78290bffe18f19c2efc5e26dd3a25cb863e9', 'staff', 1, NULL, '2026-07-20 23:29:35', '2026-08-20 01:40:47'),
-(69, '47d7c425cfcbc89d9669c71829874f100f9cedb587848824d0d3c726f29cc982', 'staff', 1, NULL, '2026-07-20 23:40:56', '2026-07-20 20:15:16'),
-(70, '0a1a55da6def09c91a2b91fdd802421268138acb979ea042a0c7bea784a87b6c', 'staff', 3, NULL, '2026-07-21 00:15:26', '2026-07-20 20:16:12');
 
 -- --------------------------------------------------------
 
@@ -876,7 +868,7 @@ ALTER TABLE `equipos`
 -- AUTO_INCREMENT for table `facturas`
 --
 ALTER TABLE `facturas`
-  MODIFY `id_factura` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=14;
+  MODIFY `id_factura` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=15;
 
 --
 -- AUTO_INCREMENT for table `logs`
@@ -960,7 +952,7 @@ ALTER TABLE `servicios`
 -- AUTO_INCREMENT for table `sesiones`
 --
 ALTER TABLE `sesiones`
-  MODIFY `id_sesion` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=71;
+  MODIFY `id_sesion` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `tareas`
@@ -1098,6 +1090,39 @@ ALTER TABLE `tickets`
 --
 ALTER TABLE `usuarios`
   ADD CONSTRAINT `fk_usuario_rol` FOREIGN KEY (`id_rol`) REFERENCES `rol` (`id_rol`);
+-- ---------------------------------------------------------------
+-- Endurecimiento del esquema (integridad y rendimiento)
+-- ---------------------------------------------------------------
+ALTER TABLE `facturas`
+  ADD UNIQUE KEY `uq_servicio_periodo` (`id_servicio`,`periodo`),
+  ADD KEY `idx_factura_estado` (`estado`),
+  ADD CONSTRAINT `chk_factura_monto` CHECK (`monto` >= 0);
+ALTER TABLE `pagos`
+  ADD KEY `idx_pago_estado` (`estado`),
+  ADD CONSTRAINT `chk_pago_monto` CHECK (`monto` > 0);
+ALTER TABLE `planes`
+  ADD UNIQUE KEY `uq_plan_nombre` (`nombre`),
+  ADD CONSTRAINT `chk_plan_precio` CHECK (`precio_mensual` >= 0);
+ALTER TABLE `tickets`
+  ADD KEY `idx_ticket_estado` (`estado`),
+  ADD CONSTRAINT `chk_ticket_estado` CHECK (`estado` IN ('Abierto','En proceso','Cerrado')),
+  ADD CONSTRAINT `chk_ticket_prioridad` CHECK (`prioridad` IN ('Alta','Media','Baja'));
+ALTER TABLE `tareas`
+  ADD KEY `idx_tarea_estado` (`estado`),
+  ADD CONSTRAINT `chk_tarea_estado` CHECK (`estado` IN ('Pendiente','En curso','Completada')),
+  ADD CONSTRAINT `chk_tarea_prioridad` CHECK (`prioridad` IN ('Alta','Media','Baja'));
+ALTER TABLE `sesiones`
+  ADD KEY `idx_sesion_expira` (`expira_en`);
+ALTER TABLE `clientes`
+  ADD KEY `idx_cliente_correo` (`correo`);
+ALTER TABLE `nodos`
+  ADD CONSTRAINT `chk_nodo_coord` CHECK (`latitud` BETWEEN -90 AND 90 AND `longitud` BETWEEN -180 AND 180);
+ALTER TABLE `naps`
+  ADD CONSTRAINT `chk_nap_coord` CHECK (`latitud` BETWEEN -90 AND 90 AND `longitud` BETWEEN -180 AND 180),
+  ADD CONSTRAINT `chk_nap_puertos` CHECK (`cantidad_puertos_max` > 0);
+ALTER TABLE `equipos`
+  ADD CONSTRAINT `chk_equipo_puerto` CHECK (`num_puerto_nap` > 0);
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

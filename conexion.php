@@ -56,6 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // una instalación típica de XAMPP: MySQL en 127.0.0.1, usuario "root" sin
 // clave. Docker no depende de estos valores porque docker-compose.yml
 // siempre define DB_HOST/DB_USER/etc. explícitamente para el contenedor.
+date_default_timezone_set(getenv('APP_TIMEZONE') ?: 'America/Caracas');
 $host = getenv('DB_HOST') ?: '127.0.0.1';
 $dbname = getenv('DB_NAME') ?: 'redytelca';
 $user = getenv('DB_USER') ?: 'root';
@@ -71,6 +72,9 @@ foreach ($ports as $port) {
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_TIMEOUT => 5,
         ]);
+        // La hora de MySQL (NOW()) debe coincidir con la de PHP (date()); si no,
+        // las sesiones expiran mal en hostings con otra zona horaria.
+        $pdo->exec("SET time_zone = '" . date('P') . "'");
         break;
     } catch (PDOException $e) {
         $connectionError = $e;

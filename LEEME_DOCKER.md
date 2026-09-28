@@ -129,3 +129,78 @@ docker compose up --build
 
 (`-v` borra el volumen `db_data`; sin esa bandera, MySQL solo importa el
 `.sql` la primera vez que crea el volumen, no en cada arranque).
+
+## Segunda ronda de cambios (base de datos, portal del cliente, diseño)
+
+**Base de datos — errores de datos e integridad que corregí en `bd_redytelca.sql`:**
+- Quité las 8 filas de la tabla `sesiones` que venían en el dump: son
+  tokens de sesión de pruebas anteriores con fechas de expiración
+  inconsistentes (algunas "expiraban" antes de haberse "creado"). No
+  deben viajar en un dump de instalación — las sesiones las crea el
+  login en caliente.
+- El servicio con `id_servicio=4` tenía longitud **positiva**
+  (`66.90300000`) en vez de negativa, lo que lo ubicaba en Asia en vez
+  de Venezuela; corregido.
+- Dos nodos y tres NAPs tenían coordenadas `0.00000000, 0.00000000`
+  (el famoso punto en medio del océano Atlántico, "Null Island"), lo
+  que rompía el mapa. Les puse coordenadas reales alrededor de Caracas.
+- El equipo `id_equipo=11` estaba físicamente asignado a NAP-10 pero su
+  servicio (`id_servicio=11`) cuelga de NAP-12: inconsistencia entre
+  equipo y servicio. Corregido para que coincidan.
+- El contrato `id_contrato=12` decía "vencido, rescindido por falta de
+  pago" pero apuntaba al servicio 12 (activo y con su factura pagada);
+  la nota realmente correspondía al servicio 13 (el que sí está
+  suspendido). Corregido, y le añadí su factura vencida correspondiente
+  (antes no tenía ninguna, así que "vencido por falta de pago" no
+  cuadraba con ningún cobro pendiente).
+- **Zona horaria:** `conexion.php` ahora sincroniza la zona horaria de
+  MySQL con la de PHP en cada conexión (`SET time_zone`). Antes, si el
+  servidor de base de datos tenía otra zona horaria que el servidor
+  PHP, las sesiones podían darse por expiradas antes de tiempo o durar
+  de más, porque `NOW()` de MySQL y `date()` de PHP no coincidían.
+- Añadí llaves únicas, índices y restricciones `CHECK` que faltaban:
+  una factura no puede repetirse para el mismo servicio y período, los
+  montos y precios no pueden ser negativos, los estados de tickets y
+  tareas quedan limitados a los valores válidos que ya usa la
+  interfaz, y las coordenadas de nodos/NAPs quedan acotadas a rangos
+  geográficos válidos. Esto hace que la base de datos rechace datos
+  corruptos en vez de aceptarlos silenciosamente.
+
+**Portal del cliente — lo rehice por completo** (`portal_cliente.php` +
+`portal_api.php`, nuevo). Antes era una maqueta estática con datos
+inventados ("Saldo pendiente: $120,00" fijo) y sin backend real
+(llamaba a `/api_pagar.php`, que no existe). Ahora:
+- El cliente inicia sesión con su cédula (contraseña inicial = su
+  cédula; se le exige cambiarla).
+- Ve sus servicios, facturas reales, saldo pendiente real, historial de
+  pagos y puede reportar un pago (queda "en revisión" hasta que el
+  staff lo valide desde el panel admin).
+- Puede abrir tickets de soporte y ver el estado de los que ya creó.
+- Diseño responsive de verdad: tarjetas, pestañas arriba en escritorio
+  y barra de navegación abajo en el celular (como una app), pensado
+  para que lo use el cliente final desde su teléfono.
+
+**Diseño e interfaz del panel admin:**
+- Encontré el motivo concreto por el que el sistema "no se acomodaba a
+  todas las pantallas": en celulares, el menú lateral no se ocultaba
+  por defecto y quedaba tapando el contenido. Ahora en pantallas
+  pequeñas arranca oculto, se abre con el botón ☰, y aparece un fondo
+  oscuro detrás que lo cierra al tocarlo fuera — como cualquier app
+  con menú deslizante.
+- Ajustes menores de espaciado para pantallas muy pequeñas (celulares
+  angostos) en el encabezado y el login.
+
+No toqué la lógica de negocio del panel admin (clientes, tickets,
+facturación, etc.) — esa parte ya funcionaba bien; el trabajo de esta
+ronda fue integridad de datos, el portal del cliente y que la interfaz
+se vea bien en cualquier tamaño de pantalla.
+
+## Cómo aplicar estos cambios si ya lo tienes desplegado
+
+- **Docker (local):** `docker compose down -v && docker compose up --build`
+  para que se reimporte `bd_redytelca.sql` con las correcciones.
+- **Render + base de datos alojada:** vuelve a importar `bd_redytelca.sql`
+  en tu base de datos (reemplazando las tablas existentes), y vuelve a
+  desplegar el código (push a GitHub si Render está conectado al repo).
+- **XAMPP:** reimporta `bd_redytelca.sql` desde phpMyAdmin.
+
