@@ -32,12 +32,12 @@ services:
       MYSQL_USER: ${DB_USER:-redytelca}
       MYSQL_PASSWORD: ${DB_PASS:-redytelca_pass}
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS:-root_pass}
-    # bd_redytelca.sql ya trae el esquema completo (incluye las tablas RBAC:
+    # bd.sql ya trae el esquema completo (incluye las tablas RBAC:
     # rol, permissions, role_permission, rol_modulo_pagina, sesiones, etc.),
     # así que basta con importarlo una vez al crear el contenedor.
     volumes:
       - db_data:/var/lib/mysql
-      - ./bd_redytelca.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./bd.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASS:-root_pass}"]
       interval: 5s

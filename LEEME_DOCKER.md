@@ -13,7 +13,7 @@
    (`migrations/002_rbac_dinamico_seed.sql`) — el proyecto solo trae
    `001_create_rbac_tables.sql`. Ejecutar ese script fallaba siempre con
    "archivo no encontrado". Ya no hace falta ejecutarlo para una
-   instalación nueva porque `bd_redytelca.sql` ya trae el esquema
+   instalación nueva porque `bd.sql` ya trae el esquema
    completo (incluye `rol`, `permissions`, `role_permission`,
    `rol_modulo_pagina`, `sesiones`, etc.), pero lo dejé apuntando al
    archivo que sí existe (es idempotente, no rompe nada si lo corres).
@@ -47,7 +47,7 @@ si no lo necesitas, es candidato a eliminar.
 3. Entra a `http://localhost/phpmyadmin`, crea una base de datos nueva
    llamada **`redytelca`** (cotejamiento `utf8mb4_general_ci`).
 4. Con esa base seleccionada, pestaña "Importar" → elige el archivo
-   `bd_redytelca.sql` de este proyecto → Importar.
+   `bd.sql` de este proyecto → Importar.
 5. Abre `http://localhost/redytelca/index.html` (panel admin) o
    `http://localhost/redytelca/portal_cliente.php` (portal cliente).
 
@@ -123,7 +123,7 @@ Este comando:
 - Construye la imagen PHP 8.2 + Apache (con `pdo_mysql` y `mod_rewrite`
   habilitados, como pide el `.htaccess`).
 - Levanta un contenedor MySQL 8.0 y **importa automáticamente
-  `bd_redytelca.sql`** la primera vez que se crea el volumen.
+  `bd.sql`** la primera vez que se crea el volumen.
 - Espera a que MySQL esté realmente listo antes de arrancar la app
   (`healthcheck`), para evitar el típico error de "connection refused"
   al primer arranque.
@@ -140,7 +140,7 @@ a `.env` y edítalo antes de correr `docker compose up`.
 ### Reiniciar desde cero
 
 Si necesitas que el `.sql` se vuelva a importar (por ejemplo, tras
-editar `bd_redytelca.sql`), borra el volumen de datos:
+editar `bd.sql`), borra el volumen de datos:
 
 ```bash
 docker compose down -v
@@ -152,7 +152,7 @@ docker compose up --build
 
 ## Segunda ronda de cambios (base de datos, portal del cliente, diseño)
 
-**Base de datos — errores de datos e integridad que corregí en `bd_redytelca.sql`:**
+**Base de datos — errores de datos e integridad que corregí en `bd.sql`:**
 - Quité las 8 filas de la tabla `sesiones` que venían en el dump: son
   tokens de sesión de pruebas anteriores con fechas de expiración
   inconsistentes (algunas "expiraban" antes de haberse "creado"). No
@@ -218,9 +218,62 @@ se vea bien en cualquier tamaño de pantalla.
 ## Cómo aplicar estos cambios si ya lo tienes desplegado
 
 - **Docker (local):** `docker compose down -v && docker compose up --build`
-  para que se reimporte `bd_redytelca.sql` con las correcciones.
-- **Render + base de datos alojada:** vuelve a importar `bd_redytelca.sql`
+  para que se reimporte `bd.sql` con las correcciones.
+- **Render + base de datos alojada:** vuelve a importar `bd.sql`
   en tu base de datos (reemplazando las tablas existentes), y vuelve a
   desplegar el código (push a GitHub si Render está conectado al repo).
-- **XAMPP:** reimporta `bd_redytelca.sql` desde phpMyAdmin.
+- **XAMPP:** reimporta `bd.sql` desde phpMyAdmin.
 
+
+## Cuarta ronda de cambios (frontend: logos, dashboard, mapa, móvil)
+
+Esta ronda partió del `.rar` que subiste (que incluía tus archivos
+`DOCUMENTACION.md`, `IMPROVEMENTS.md`, `composer.json` y el renombre de
+`bd_redytelca.sql` a `bd.sql`) y corrigió lo siguiente:
+
+- **Docker apuntaba al archivo SQL equivocado.** `docker-compose.yml` y
+  esta guía todavía decían `bd_redytelca.sql`, pero el archivo en el
+  proyecto ya se llama `bd.sql`. En una instalación nueva, Docker no
+  encontraba ese archivo y la base de datos nunca se cargaba. Corregido.
+- **Logos recortados / muy pequeños en el panel admin.** El logo real
+  mide 322×59 px (y el del menú lateral, 604×97 px) — son wordmarks
+  anchos y bajos, no íconos cuadrados. El contenedor del logo en el
+  menú lateral (`.brand-logo-wrap`) estaba fijo en 48×48 px, así que el
+  logo se encogía hasta quedar casi invisible (una tira de ~9 px de
+  alto). Ahora el contenedor usa todo el ancho del menú y una altura de
+  hasta 48px, así que el logo se ve completo y legible. También quité
+  el texto "REDYTELCA" duplicado al lado (el logo ya lo incluye) para
+  que no compita por espacio.
+- **El dashboard mostraba las barras en negro.** Esta fue la causa real:
+  las gráficas (Chart.js, que dibuja sobre un `<canvas>`) recibían
+  colores como el texto literal `'var(--accent)'`. El `<canvas>` no
+  entiende variables CSS como el resto de la página — a diferencia de
+  un `<div>`, ahí esa cadena de texto no significa nada y Chart.js cae
+  en negro por defecto. Afectaba prácticamente todas las gráficas del
+  panel (ingresos, facturación, servicios, OLTs, NAPs, tickets). Ahora
+  hay una función `cssVar()` que primero resuelve el color real antes
+  de dárselo a Chart.js, así que cada gráfica usa sus colores correctos
+  (azul, verde, ámbar, rojo según corresponda).
+- **El mapa se sobreponía al menú lateral.** El panel del mapa
+  (`.map-panel`, donde vive Leaflet) tenía `position: relative` pero
+  sin `z-index` propio. Eso significa que no "contenía" el apilamiento
+  interno de Leaflet (sus controles llegan a z-index 1000), así que esos
+  controles terminaban compitiendo directamente con el menú lateral en
+  vez de quedar encerrados dentro del panel del mapa. Con un `z-index`
+  explícito en `.map-panel`, todo lo de Leaflet queda contenido ahí
+  adentro y el menú siempre queda por delante.
+- **Incomodidad en el teléfono:** los campos de texto no tenían
+  `font-size` explícito, y por debajo de 16px Safari en iPhone hace zoom
+  automático al tocar un campo — de ahí buena parte de la sensación de
+  "incómodo". Ahora todos los inputs, selects y textareas usan 16px.
+- **Dashboard más profesional:** le agregué una barra de color superior
+  a cada tarjeta (distinta por tarjeta), efecto de elevación al pasar
+  el mouse, y números más grandes y con más peso — mismo contenido,
+  mejor jerarquía visual.
+
+**Importante:** noté que este `.rar` no incluye el cambio que hicimos
+para el portal de pago (login solo con cédula + subir el comprobante
+arrastrándolo, con `portal_api.php`, `comprobante.php` y la carpeta
+`uploads/`) — parece que se quedó solo en el zip que te entregué antes
+y nunca se fusionó con tu copia de trabajo. Si quieres que lo integre
+de nuevo en esta versión, dímelo y lo hago en el siguiente mensaje.

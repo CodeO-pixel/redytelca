@@ -33,28 +33,34 @@ body { margin: 0; background: var(--bg); display: flex; }
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-align: center;
+    padding: 4px 6px 18px;
     margin-bottom: 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 .brand-logo-wrap {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 48px;
-    height: 48px;
-    padding: 6px;
+    width: 100%;
+    padding: 8px 10px;
     border-radius: 14px;
     background: rgba(255,255,255,0.12);
-    flex-shrink: 0;
 }
 .brand-logo {
     width: 100%;
-    height: 100%;
+    height: auto;
+    max-height: 48px;
     object-fit: contain;
+}
+/* El logo ya es un wordmark completo (incluye el texto "REDYTELCA"), así
+   que el <span> de al lado queda solo como texto accesible para lectores
+   de pantalla, sin duplicar visualmente el nombre ni apretar el logo. */
+.brand span {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
 }
 .login-brand {
     width: 100%;
@@ -409,6 +415,10 @@ input, select, textarea {
     margin: 8px 0;
     border: 1px solid var(--border);
     border-radius: 10px;
+    /* 16px explícito: por debajo de eso, Safari en iPhone hace zoom
+       automático al tocar un campo — uno de los motivos por los que el
+       sistema se sentía incómodo en el teléfono. */
+    font-size: 16px;
 }
 textarea {
     min-height: 120px;
@@ -473,8 +483,36 @@ button {
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 16px;
 }
+.dashboard-grid .card.chart-card {
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.dashboard-grid .card.chart-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent), #60a5fa);
+}
+.dashboard-grid .card.chart-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+}
+.dashboard-grid .card.chart-card.border-red::before { background: linear-gradient(90deg, var(--danger), #f87171); }
+.dashboard-grid .card.chart-card:nth-of-type(2)::before { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.dashboard-grid .card.chart-card:nth-of-type(3)::before { background: linear-gradient(90deg, #7c3aed, #a78bfa); }
+.dashboard-grid .card.chart-card:nth-of-type(4)::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.dashboard-grid .card.chart-card:nth-of-type(6)::before { background: linear-gradient(90deg, #0891b2, #22d3ee); }
+.dashboard-grid .card.chart-card:nth-of-type(7)::before { background: linear-gradient(90deg, #db2777, #f472b6); }
 .card.chart-card {
     min-height: 180px;
+}
+.card.chart-card h2 {
+    font-size: 2.1rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 2px 0;
 }
 .card.chart-card canvas {
     width: 100% !important;
@@ -757,6 +795,12 @@ table td:last-child {
     height: 480px;
     min-height: 420px;
     position: relative;
+    /* Sin este z-index, .map-panel no "atrapa" el apilamiento interno de
+       Leaflet (controles y capas llegan a z-index:1000) y esos controles
+       terminaban dibujándose por encima del menú lateral, tapándolo. Con
+       esto, todo lo de adentro del mapa queda contenido y el menú (que
+       tiene z-index más alto) siempre queda por delante. */
+    z-index: 1;
     overflow: hidden;
     border-radius: 18px;
     border: 1px solid var(--border);

@@ -2352,10 +2352,16 @@ function updateDashboardData() {
         parent.appendChild(note);
     };
 
+    // Chart.js dibuja en un <canvas>, y el Canvas 2D API (a diferencia del
+    // CSS normal) NO entiende var(--nombre): si se le pasa ese texto tal
+    // cual como color, cae en negro por defecto — por eso todas las
+    // gráficas del dashboard se veían en negro. cssVar() resuelve la
+    // variable a su color real antes de dársela a Chart.js.
+    const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#2563eb';
+
     const renderChart = (canvasId, chartConfig) => {
         const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
-        const previous = window.dashboardCharts?.[canvasId];
+        if (!canvas) return;        const previous = window.dashboardCharts?.[canvasId];
         if (previous) previous.destroy();
         window.dashboardCharts = window.dashboardCharts || {};
         clearChartState(canvas);
@@ -2384,7 +2390,7 @@ function updateDashboardData() {
                     datasets: [{
                         label: 'Ingresos validado',
                         data: dataSegments,
-                        borderColor: 'var(--accent)',
+                        borderColor: cssVar('--accent'),
                         backgroundColor: 'rgba(' + accentRgb + ', 0.18)',
                         fill: true,
                         tension: 0.35
@@ -2394,7 +2400,7 @@ function updateDashboardData() {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
-                    scales: { y: { beginAtZero: true, ticks: { color: 'var(--muted)' } }, x: { ticks: { color: 'var(--muted)' } } }
+                    scales: { y: { beginAtZero: true, ticks: { color: cssVar('--muted') } }, x: { ticks: { color: cssVar('--muted') } } }
                 }
             });
         } else {
@@ -2411,7 +2417,7 @@ function updateDashboardData() {
         }, {});
         const labels = Object.keys(stateCounts);
         const data = Object.values(stateCounts);
-        const colors = labels.map(label => label === 'pagada' ? 'var(--success)' : (label === 'vencida' ? 'var(--danger)' : 'var(--warning)'));
+        const colors = labels.map(label => label === 'pagada' ? cssVar('--success') : (label === 'vencida' ? cssVar('--danger') : cssVar('--warning')));
         if (labels.length) {
             renderChart('dashboard-billing-chart', {
                 type: 'doughnut',
@@ -2432,7 +2438,7 @@ function updateDashboardData() {
         }, {});
         const labels = Object.keys(stateCounts);
         const data = Object.values(stateCounts);
-        const colors = labels.map(label => label === 'activo' ? 'var(--success)' : (label === 'suspendido' || label === 'pendiente' ? 'var(--warning)' : 'var(--danger)'));
+        const colors = labels.map(label => label === 'activo' ? cssVar('--success') : (label === 'suspendido' || label === 'pendiente' ? cssVar('--warning') : cssVar('--danger')));
         if (labels.length) {
             renderChart('dashboard-services-chart', {
                 type: 'doughnut',
@@ -2451,7 +2457,7 @@ function updateDashboardData() {
         if (labels.length) {
             renderChart('dashboard-olts-chart', {
                 type: 'bar',
-                data: { labels, datasets: [{ label: 'NAPs por OLT', data, backgroundColor: 'var(--accent)' }] },
+                data: { labels, datasets: [{ label: 'NAPs por OLT', data, backgroundColor: cssVar('--accent') }] },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
             });
         } else {
@@ -2467,7 +2473,7 @@ function updateDashboardData() {
         if (labels.length) {
             renderChart('dashboard-naps-chart', {
                 type: 'bar',
-                data: { labels, datasets: [{ label: 'Clientes', data, backgroundColor: 'var(--accent)' }, { label: 'Puertos', data: maxData, backgroundColor: 'var(--warning)' }] },
+                data: { labels, datasets: [{ label: 'Clientes', data, backgroundColor: cssVar('--accent') }, { label: 'Puertos', data: maxData, backgroundColor: cssVar('--warning') }] },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
             });
         } else {
@@ -2488,7 +2494,7 @@ function updateDashboardData() {
         const data = Object.values(counts);
         const colors = labels.map(label => {
             const priority = label.split(':')[0].toLowerCase();
-            return priority === 'alta' ? 'var(--danger)' : (priority === 'media' ? 'var(--warning)' : 'var(--success)');
+            return priority === 'alta' ? cssVar('--danger') : (priority === 'media' ? cssVar('--warning') : cssVar('--success'));
         });
         if (labels.length) {
             renderChart('dashboard-tickets-chart', {
