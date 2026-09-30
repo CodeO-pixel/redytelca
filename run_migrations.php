@@ -25,6 +25,13 @@ try {
     // en la pestaña SQL de phpMyAdmin.
     $pdo->exec($sql);
     echo "Migración 001 (tablas RBAC) ejecutada correctamente\n";
+
+    $sql = file_get_contents(__DIR__ . '/migrations/002_email_verification_tokens.sql');
+    if ($sql === false) {
+        throw new Exception('No se encontró la migración 002_email_verification_tokens.sql');
+    }
+    $pdo->exec($sql);
+    echo "Migración 002 (tokens de verificación de correo) ejecutada correctamente\n";
 } catch (Exception $e) {
     echo "Error ejecutando migraciones: " . $e->getMessage() . "\n";
     exit(1);

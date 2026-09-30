@@ -1,7 +1,7 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
-requireStaffAuth($pdo);
+requirePageAccess($pdo, 'clientes');
 
 /**
  * CORRECCIÓN FASE 2.5: se mantiene la creación del PRIMER servicio en el

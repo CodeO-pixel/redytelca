@@ -9,6 +9,14 @@ services:
       DB_NAME: ${DB_NAME:-redytelca}
       DB_USER: ${DB_USER:-redytelca}
       DB_PASS: ${DB_PASS:-redytelca_pass}
+      REDYTELCA_BASE_URL: ${REDYTELCA_BASE_URL:-http://localhost:8080}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_ENCRYPTION: ${SMTP_ENCRYPTION:-tls}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-REDYTELCA}
       # Orígenes permitidos para CORS (conexion.php). Ajusta si accedes
       # desde otro host/puerto que no sea localhost:8080.
       REDYTELCA_ALLOWED_ORIGINS: "http://localhost:8080,http://127.0.0.1:8080"

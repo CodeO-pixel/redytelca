@@ -118,13 +118,11 @@ button,input,select,textarea{font:inherit}
   </div>
   <div class="login-panel">
     <form class="login-box" id="login-form" autocomplete="on">
-      <h2>Bienvenido</h2>
-      <p class="sub">Ingresa con tu cédula para ver tu cuenta.</p>
-      <div class="field"><label for="cedula">Cédula</label><input id="cedula" name="cedula" placeholder="Ej. V-12345678" autocomplete="username" required></div>
-      <div class="field"><label for="password">Contraseña</label><input id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required></div>
-      <button class="btn block" id="login-btn" type="submit">Ingresar</button>
+      <h2>Bienvenido al Portal</h2>
+      <p class="sub">Ingresa tu número de cédula para consultar tus facturas, reportar pagos y solicitar soporte.</p>
+      <div class="field"><label for="cedula">Cédula de Identidad</label><input id="cedula" name="cedula" placeholder="Ej. V-12345678" autocomplete="username" required></div>
+      <button class="btn block" id="login-btn" type="submit">Ingresar al Portal</button>
       <div class="msg" id="login-msg" role="alert"></div>
-      <div class="hint">¿Primera vez? Tu contraseña inicial es tu cédula. Te pediremos cambiarla al entrar.</div>
     </form>
   </div>
 </section>
@@ -177,7 +175,7 @@ const fdate = d => d ? new Date(String(d).replace(' ', 'T')).toLocaleDateString(
 const badgeClass = e => ({pagada:'b-ok',validado:'b-ok',activo:'b-ok',Cerrado:'b-ok',pendiente:'b-warn',parcial:'b-warn','En proceso':'b-info',Abierto:'b-info',vencida:'b-bad',rechazado:'b-bad',suspendido:'b-bad'}[e] || 'b-gray');
 let token = localStorage.getItem('portal_token') || '';
 let data = null, tab = 'resumen';
-const TABS = [['resumen','🏠','Resumen'],['facturas','🧾','Facturas'],['pagos','💳','Pagos'],['soporte','🛠️','Soporte'],['cuenta','👤','Mi cuenta']];
+const TABS = [['resumen','🏠','Resumen'],['facturas','🧾','Facturas'],['pagos','💳','Pagos'],['soporte','🛠️','Soporte']];
 
 async function api(action, body, method) {
   const opt = {headers: {'Content-Type': 'application/json', 'X-Session-Token': token}};
@@ -194,10 +192,10 @@ $('#login-form').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = $('#login-btn'), msg = $('#login-msg');
   btn.disabled = true; msg.textContent = ''; msg.className = 'msg';
-  const r = await api('login', {cedula: $('#cedula').value.trim(), password: $('#password').value});
+  const r = await api('login', {cedula: $('#cedula').value.trim()});
   btn.disabled = false;
-  if (r.status === 'success') { token = r.token; localStorage.setItem('portal_token', token); if (r.must_change_password) tab = 'cuenta'; await load(); }
-  else { msg.textContent = r.message || 'No se pudo iniciar sesión.'; msg.classList.add('err'); }
+  if (r.status === 'success') { token = r.token; localStorage.setItem('portal_token', token); await load(); }
+  else { msg.textContent = r.message || 'No se pudo ingresar.'; msg.classList.add('err'); }
 });
 $('#logout-btn').onclick = async () => { await api('logout', {}); logoutLocal(); };
 

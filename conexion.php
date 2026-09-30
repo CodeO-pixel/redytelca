@@ -85,14 +85,11 @@ if ($pdo === null) {
     if (php_sapi_name() !== 'cli') {
         header('Content-Type: application/json; charset=utf-8');
         http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Error de conexión: " . ($connectionError ? $connectionError->getMessage() : 'No se pudo conectar a MySQL')]);
+        echo json_encode(["status" => "error", "message" => "Error de conexión con la base de datos."]);
         exit;
     }
     throw $connectionError;
 }
-
-// Auto-reparación: Renombrar "Administración y accesos" a "Roles" para coherencia de UI
-$pdo->exec("UPDATE paginas SET nombre_pagina = 'Roles', url_pagina = 'roles' WHERE id_pagina = 10");
 
 /**
  * FASE 1 (pendiente resuelto) — MIGRACIÓN DE CONTRASEÑAS A password_hash():

@@ -33,17 +33,20 @@ $action = $_GET['action'] ?? ($input['action'] ?? '');
 try {
     /* ---------------------------- LOGIN ---------------------------- */
     if ($action === 'login') {
-        $cedula = trim((string) ($input['cedula'] ?? ''));
-        $password = (string) ($input['password'] ?? '');
-        if ($cedula === '' || $password === '') {
-            out(['status' => 'error', 'message' => 'Ingresa tu cédula y tu contraseña.'], 422);
+        $cedulaInput = trim((string) ($input['cedula'] ?? ''));
+        if ($cedulaInput === '') {
+            out(['status' => 'error', 'message' => 'Por favor ingresa tu cédula para continuar.'], 422);
         }
 
-        $stmt = $pdo->prepare('SELECT id_cliente, nombres, apellidos, cedula, correo FROM clientes WHERE cedula = ?');
-        $stmt->execute([$cedula]);
+        // Búsqueda flexible por cédula exacta o limpia sin guiones/prefijos
+        $cleanInput = preg_replace('/[^0-9]/', '', $cedulaInput);
+
+        $stmt = $pdo->prepare('SELECT id_cliente, nombres, apellidos, cedula, correo FROM clientes WHERE cedula = ? OR REPLACE(REPLACE(REPLACE(cedula, "V-", ""), "E-", ""), "-", "") = ? OR cedula LIKE ?');
+        $stmt->execute([$cedulaInput, $cleanInput, '%' . $cleanInput]);
         $cliente = $stmt->fetch(PDO::FETCH_ASSOC);
+
         if (!$cliente) {
-            out(['status' => 'error', 'message' => 'Cédula o contraseña incorrectos.'], 401);
+            out(['status' => 'error', 'message' => 'No se encontró ningún cliente registrado con esa cédula.'], 404);
         }
 
         $stmt = $pdo->prepare('SELECT * FROM clientes_credenciales WHERE id_cliente = ?');
@@ -51,13 +54,13 @@ try {
         $cred = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$cred) {
-            // Primer ingreso: la clave inicial es la propia cédula.
+            // Auto-crear credencial vinculada al cliente
             $ins = $pdo->prepare('INSERT INTO clientes_credenciales (id_cliente, username, password, correo_recuperacion, must_change_password)
-                                  VALUES (?, ?, ?, ?, 1)');
+                                  VALUES (?, ?, ?, ?, 0)');
             $ins->execute([
                 $cliente['id_cliente'],
                 substr($cliente['cedula'], 0, 15),
-                password_hash($cliente['cedula'], PASSWORD_DEFAULT),
+                password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT),
                 $cliente['correo'],
             ]);
             $stmt = $pdo->prepare('SELECT * FROM clientes_credenciales WHERE id_cliente = ?');
@@ -65,8 +68,8 @@ try {
             $cred = $stmt->fetch(PDO::FETCH_ASSOC);
         }
 
-        if ($cred['estado'] !== 'activa' || !password_verify($password, $cred['password'])) {
-            out(['status' => 'error', 'message' => 'Cédula o contraseña incorrectos.'], 401);
+        if (isset($cred['estado']) && $cred['estado'] !== 'activa') {
+            out(['status' => 'error', 'message' => 'Tu cuenta del portal se encuentra suspendida. Contacta a atención al cliente.'], 403);
         }
 
         $token = bin2hex(random_bytes(32));
@@ -79,7 +82,6 @@ try {
         out([
             'status' => 'success',
             'token' => $token,
-            'must_change_password' => (int) $cred['must_change_password'] === 1,
             'nombre' => $cliente['nombres'] . ' ' . $cliente['apellidos'],
         ]);
     }

@@ -54,6 +54,11 @@ if ($method === 'PUT') {
     $longitudRaw = isset($input['longitud']) && $input['longitud'] !== '' ? $input['longitud'] : null;
     $latitud = $latitudRaw !== null ? str_replace(',', '.', (string) $latitudRaw) : null;
     $longitud = $longitudRaw !== null ? str_replace(',', '.', (string) $longitudRaw) : null;
+    $nombre = trim($input['nombre'] ?? '');
+    if ($nombre === '') {
+        echo json_encode(['status' => 'error', 'message' => 'El nombre del nodo es obligatorio']);
+        exit;
+    }
     if ($latitudRaw !== null && !is_numeric($latitud)) {
         echo json_encode(['status' => 'error', 'message' => 'La latitud/longitud debe ser un número válido (usa punto como separador decimal, ej. 10.4806).']);
         exit;

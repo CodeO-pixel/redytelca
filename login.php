@@ -48,43 +48,28 @@ try {
             ->execute(['admin', hashearPasswordNueva('123456'), 1]);
     }
 
-    $stmtUser = $pdo->prepare("SELECT id_usuario, username, password, id_rol, must_change_password FROM usuarios WHERE username = ?");
+    $stmtUser = $pdo->prepare("SELECT id_usuario, username, password, id_rol, must_change_password, email_verified FROM usuarios WHERE username = ?");
     $stmtUser->execute([$username]);
     $userRow = $stmtUser->fetch();
 
     if (!$userRow) {
-        if ($username === 'admin' && in_array($password, ['admin123', '123456'], true)) {
-            $insertStmt = $pdo->prepare("INSERT INTO usuarios (username, password, id_rol) VALUES (?, ?, 1)");
-            $insertStmt->execute([$username, hashearPasswordNueva($password)]);
-            $userRow = [
-                'id_usuario' => $pdo->lastInsertId(),
-                'username' => $username,
-                'password' => hashearPasswordNueva($password),
-                'id_rol' => 1
-            ];
-        } else {
-            http_response_code(401);
-            echo json_encode(['status' => 'error', 'message' => 'Usuario o contraseña incorrectos.']);
-            exit;
-        }
-    } else {
-        // FASE 1 (pendiente resuelto): verificación centralizada con
-        // migración perezosa de texto plano -> hash. Sustituye la
-        // comparación directa `$userRow['password'] !== $password`.
-        $credencialesValidas = verificarYMigrarPassword($pdo, $password, $userRow['password'], (int) $userRow['id_usuario']);
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'Usuario o contraseña incorrectos.']);
+        exit;
+    }
 
-        if (!$credencialesValidas) {
-            if ($username === 'admin' && $password === 'admin123') {
-                $nuevoHash = hashearPasswordNueva($password);
-                $updateStmt = $pdo->prepare("UPDATE usuarios SET password = ? WHERE id_usuario = ?");
-                $updateStmt->execute([$nuevoHash, $userRow['id_usuario']]);
-                $userRow['password'] = $nuevoHash;
-            } else {
-                http_response_code(401);
-                echo json_encode(['status' => 'error', 'message' => 'Usuario o contraseña incorrectos.']);
-                exit;
-            }
-        }
+    $credencialesValidas = verificarYMigrarPassword($pdo, $password, $userRow['password'], (int) $userRow['id_usuario']);
+
+    if (!$credencialesValidas) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'Usuario o contraseña incorrectos.']);
+        exit;
+    }
+
+    if (empty($userRow['email_verified'])) {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'message' => 'Debes verificar tu correo antes de iniciar sesión. Revisa tu bandeja de entrada.']);
+        exit;
     }
 
     $stmtRole = $pdo->prepare("SELECT nombre_rol FROM rol WHERE id_rol = ?");
@@ -130,7 +115,6 @@ try {
     http_response_code(500);
     echo json_encode([
         'status' => 'error',
-        'message' => 'Error interno del servidor al procesar el control de accesos.',
-        'detail' => $e->getMessage()
+        'message' => 'Error interno del servidor al procesar el control de accesos.'
     ]);
 }

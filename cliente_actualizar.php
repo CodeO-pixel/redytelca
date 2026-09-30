@@ -1,7 +1,7 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
-requireStaffAuth($pdo);
+requirePageAccess($pdo, 'clientes');
 
 /**
  * CORRECCIÓN FASE 2.5: este archivo tocaba `servicios` además de `clientes`,

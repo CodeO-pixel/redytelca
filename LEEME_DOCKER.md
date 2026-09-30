@@ -88,6 +88,26 @@ Enter — se abrirá una terminal ya ubicada ahí.
 
 ### Paso 3: un solo comando
 
+Antes de arrancar, crea un archivo `.env` en la carpeta del proyecto con
+la URL donde estará disponible la aplicación y los datos SMTP de una
+cuenta autorizada para enviar correo:
+
+```dotenv
+REDYTELCA_BASE_URL=http://localhost:8080
+SMTP_HOST=smtp.tu-proveedor.com
+SMTP_PORT=587
+SMTP_USERNAME=tu-cuenta@tu-dominio.com
+SMTP_PASSWORD=tu-clave-o-clave-de-aplicacion
+SMTP_ENCRYPTION=tls
+SMTP_FROM_EMAIL=tu-cuenta@tu-dominio.com
+SMTP_FROM_NAME=REDYTELCA
+```
+
+En producción, cambia `REDYTELCA_BASE_URL` por el dominio HTTPS real.
+La creación de usuarios envía un enlace válido por 24 horas y no guarda
+la cuenta si el correo no pudo enviarse. En una base existente, ejecuta
+`php run_migrations.php` una vez para crear la tabla de tokens.
+
 ```bash
 docker compose up --build
 ```

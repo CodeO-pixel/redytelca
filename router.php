@@ -21,9 +21,26 @@ if ($first === 'admin' || $first === '') {
     }
 }
 
-// If nothing matched, try to serve a file if present, otherwise 404
-$path = __DIR__ . $uri;
-if (file_exists($path) && is_file($path)) {
+// Allowed static asset extensions
+$allowedExts = ['css', 'js', 'png', 'jpg', 'jpeg', 'webp', 'svg', 'ico', 'woff', 'woff2', 'ttf', 'pdf'];
+$ext = strtolower(pathinfo($uri, PATHINFO_EXTENSION));
+
+$path = __DIR__ . '/' . $uri;
+if (in_array($ext, $allowedExts, true) && file_exists($path) && is_file($path)) {
+    $mimeTypes = [
+        'css' => 'text/css',
+        'js' => 'application/javascript',
+        'png' => 'image/png',
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'webp' => 'image/webp',
+        'svg' => 'image/svg+xml',
+        'ico' => 'image/x-icon',
+        'pdf' => 'application/pdf'
+    ];
+    if (isset($mimeTypes[$ext])) {
+        header('Content-Type: ' . $mimeTypes[$ext]);
+    }
     readfile($path);
     exit;
 }

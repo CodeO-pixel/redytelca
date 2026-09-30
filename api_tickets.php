@@ -1,10 +1,9 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
-requirePageAccess($pdo, 'tickets');
+$staffSession = requirePageAccess($pdo, 'tickets');
 
 $method = $_SERVER['REQUEST_METHOD'];
-// Auto-reparación de esquema eliminada (Prompt 5): bd_redytelca.sql es la fuente de verdad desde Fase 0, este bloque siempre resolvía a no-op.
 
 if ($method === 'GET') {
     $stmt = $pdo->query("SELECT t.*, c.nombres, c.apellidos, u.username AS creador FROM tickets t LEFT JOIN clientes c ON c.id_cliente = t.id_cliente LEFT JOIN usuarios u ON u.id_usuario = t.id_usuario_creador ORDER BY t.creado_en DESC");
@@ -23,7 +22,7 @@ if ($method === 'POST') {
     $estado = trim($input['estado'] ?? 'Abierto');
     $prioridad = trim($input['prioridad'] ?? 'Media');
     $id_cliente = (isset($input['id_cliente']) && $input['id_cliente'] !== '' && $input['id_cliente'] !== null) ? (int)$input['id_cliente'] : null;
-    $id_usuario_creador = (isset($input['id_usuario_creador']) && $input['id_usuario_creador'] !== '' && $input['id_usuario_creador'] !== null) ? (int)$input['id_usuario_creador'] : null;
+    $id_usuario_creador = (int) $staffSession['id_usuario'];
 
     if ($asunto === '') {
         echo json_encode(['status' => 'error', 'message' => 'El asunto es obligatorio']);
@@ -39,14 +38,19 @@ if ($method === 'POST') {
 
 if ($method === 'PUT') {
     $id = (int)($input['id_ticket'] ?? 0);
-    $stmt = $pdo->prepare("UPDATE tickets SET asunto = ?, descripcion = ?, estado = ?, prioridad = ?, id_cliente = ?, id_usuario_creador = ? WHERE id_ticket = ?");
+    $asunto = trim($input['asunto'] ?? '');
+    if ($asunto === '') {
+        echo json_encode(['status' => 'error', 'message' => 'El asunto no puede estar vacío']);
+        exit;
+    }
+
+    $stmt = $pdo->prepare("UPDATE tickets SET asunto = ?, descripcion = ?, estado = ?, prioridad = ?, id_cliente = ? WHERE id_ticket = ?");
     $ok = $stmt->execute([
-        trim($input['asunto'] ?? ''),
+        $asunto,
         trim($input['descripcion'] ?? ''),
         trim($input['estado'] ?? 'Abierto'),
         trim($input['prioridad'] ?? 'Media'),
         (isset($input['id_cliente']) && $input['id_cliente'] !== '' && $input['id_cliente'] !== null) ? (int)$input['id_cliente'] : null,
-        (isset($input['id_usuario_creador']) && $input['id_usuario_creador'] !== '' && $input['id_usuario_creador'] !== null) ? (int)$input['id_usuario_creador'] : null,
         $id
     ]);
     echo json_encode(['status' => $ok ? 'success' : 'error', 'message' => $ok ? 'Ticket actualizado' : 'No se pudo actualizar']);
