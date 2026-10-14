@@ -12,8 +12,8 @@
  *  POST  action=password  {actual, nueva}
  *  POST  action=logout
  *
- * Acceso inicial: usuario = cédula, clave = cédula (se crea la credencial
- * automáticamente en el primer ingreso y se obliga a cambiar la clave).
+ * Acceso: cédula y contraseña contra un hash provisionado previamente en
+ * clientes_credenciales. El login no crea credenciales.
  */
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
@@ -34,42 +34,37 @@ try {
     /* ---------------------------- LOGIN ---------------------------- */
     if ($action === 'login') {
         $cedulaInput = trim((string) ($input['cedula'] ?? ''));
-        if ($cedulaInput === '') {
-            out(['status' => 'error', 'message' => 'Por favor ingresa tu cédula para continuar.'], 422);
+        $password = (string) ($input['password'] ?? '');
+        if ($cedulaInput === '' || $password === '') {
+            out(['status' => 'error', 'message' => 'Ingresa tu cédula y contraseña para continuar.'], 422);
         }
 
-        // Búsqueda flexible por cédula exacta o limpia sin guiones/prefijos
+        if (!preg_match('/^(?:[VEJPG]-)?[0-9]{6,9}$/i', $cedulaInput)) {
+            out(['status' => 'error', 'message' => 'Cédula o contraseña incorrectas.'], 401);
+        }
+
         $cleanInput = preg_replace('/[^0-9]/', '', $cedulaInput);
 
-        $stmt = $pdo->prepare('SELECT id_cliente, nombres, apellidos, cedula, correo FROM clientes WHERE cedula = ? OR REPLACE(REPLACE(REPLACE(cedula, "V-", ""), "E-", ""), "-", "") = ? OR cedula LIKE ?');
-        $stmt->execute([$cedulaInput, $cleanInput, '%' . $cleanInput]);
-        $cliente = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt = $pdo->prepare("SELECT c.id_cliente, c.nombres, c.apellidos, cc.id_credencial, cc.password, cc.estado, cc.must_change_password
+                               FROM clientes c
+                               INNER JOIN clientes_credenciales cc ON cc.id_cliente = c.id_cliente
+                               WHERE c.cedula = ?
+                                  OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(c.cedula), 'V-', ''), 'E-', ''), 'J-', ''), 'P-', ''), 'G-', '') = ?
+                               LIMIT 2");
+        $stmt->execute([$cedulaInput, $cleanInput]);
+        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        if (!$cliente) {
-            out(['status' => 'error', 'message' => 'No se encontró ningún cliente registrado con esa cédula.'], 404);
+        if (count($matches) !== 1) {
+            out(['status' => 'error', 'message' => 'Cédula o contraseña incorrectas.'], 401);
         }
 
-        $stmt = $pdo->prepare('SELECT * FROM clientes_credenciales WHERE id_cliente = ?');
-        $stmt->execute([$cliente['id_cliente']]);
-        $cred = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$cred) {
-            // Auto-crear credencial vinculada al cliente
-            $ins = $pdo->prepare('INSERT INTO clientes_credenciales (id_cliente, username, password, correo_recuperacion, must_change_password)
-                                  VALUES (?, ?, ?, ?, 0)');
-            $ins->execute([
-                $cliente['id_cliente'],
-                substr($cliente['cedula'], 0, 15),
-                password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT),
-                $cliente['correo'],
-            ]);
-            $stmt = $pdo->prepare('SELECT * FROM clientes_credenciales WHERE id_cliente = ?');
-            $stmt->execute([$cliente['id_cliente']]);
-            $cred = $stmt->fetch(PDO::FETCH_ASSOC);
-        }
-
+        $cliente = $matches[0];
+        $cred = $cliente;
         if (isset($cred['estado']) && $cred['estado'] !== 'activa') {
             out(['status' => 'error', 'message' => 'Tu cuenta del portal se encuentra suspendida. Contacta a atención al cliente.'], 403);
+        }
+        if (!password_verify($password, $cred['password'])) {
+            out(['status' => 'error', 'message' => 'Cédula o contraseña incorrectas.'], 401);
         }
 
         $token = bin2hex(random_bytes(32));
@@ -83,12 +78,23 @@ try {
             'status' => 'success',
             'token' => $token,
             'nombre' => $cliente['nombres'] . ' ' . $cliente['apellidos'],
+            'must_change_password' => (int) $cred['must_change_password'] === 1,
         ]);
     }
 
     /* ------------------- A PARTIR DE AQUÍ: AUTENTICADO ------------------- */
     $auth = requireClientAuth($pdo);
     $idCliente = $auth['id_cliente'];
+    $stmtMustChange = $pdo->prepare('SELECT must_change_password FROM clientes_credenciales WHERE id_credencial = ?');
+    $stmtMustChange->execute([$auth['id_credencial']]);
+    $mustChangePassword = (int) $stmtMustChange->fetchColumn() === 1;
+    if ($mustChangePassword && !in_array($action, ['password', 'logout'], true)) {
+        out([
+            'status' => 'error',
+            'must_change_password' => true,
+            'message' => 'Debes cambiar la contraseña antes de consultar tu cuenta.',
+        ], 403);
+    }
 
     if ($action === 'logout') {
         $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
@@ -102,7 +108,8 @@ try {
         $cliente = $stmt->fetch(PDO::FETCH_ASSOC);
 
         $stmt = $pdo->prepare('SELECT s.id_servicio, s.alias, s.estado_comercial, s.direccion_texto,
-                                      p.nombre AS plan, p.velocidad, p.precio_mensual, p.moneda
+                           p.nombre AS plan, p.velocidad_bajada_mbps, p.velocidad_subida_mbps,
+                           p.tecnologia, p.precio_mensual, p.moneda
                                FROM servicios s INNER JOIN planes p ON p.id_plan = s.id_plan
                                WHERE s.id_cliente = ? ORDER BY s.id_servicio');
         $stmt->execute([$idCliente]);
@@ -130,10 +137,17 @@ try {
         }
         unset($f);
 
-        $stmt = $pdo->prepare('SELECT pg.id_pago, pg.id_factura, pg.monto, pg.fecha_pago, pg.metodo_pago, pg.referencia_bancaria, pg.estado
-                               FROM pagos pg WHERE pg.id_cliente = ? ORDER BY pg.fecha_pago DESC LIMIT 30');
+        $stmt = $pdo->prepare('SELECT pg.id_pago, pg.id_factura, pg.monto, pg.moneda_pago, pg.tasa_cambio,
+                          pg.fecha_pago, mp.codigo AS metodo_codigo, mp.nombre AS metodo_nombre,
+                          pg.referencia_bancaria, pg.estado
+                       FROM pagos pg LEFT JOIN metodos_pago mp ON mp.id_metodo = pg.id_metodo
+                       WHERE pg.id_cliente = ? ORDER BY pg.fecha_pago DESC LIMIT 30');
         $stmt->execute([$idCliente]);
         $pagos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $stmt = $pdo->query('SELECT id_metodo, codigo, nombre, requiere_referencia
+                     FROM metodos_pago WHERE activo = 1 ORDER BY orden, nombre');
+        $metodosPago = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $stmt = $pdo->prepare('SELECT id_ticket, asunto, estado, prioridad, creado_en FROM tickets WHERE id_cliente = ? ORDER BY creado_en DESC LIMIT 30');
         $stmt->execute([$idCliente]);
@@ -148,6 +162,7 @@ try {
             'servicios' => $servicios,
             'facturas' => $facturas,
             'pagos' => $pagos,
+            'metodos_pago' => $metodosPago,
             'tickets' => $tickets,
             'saldo_pendiente' => round($saldo, 2),
             'proximo_vencimiento' => $proximo,
@@ -157,18 +172,51 @@ try {
 
     if ($action === 'pago') {
         $idFactura = (int) ($input['id_factura'] ?? 0);
-        $metodo = (string) ($input['metodo'] ?? '');
+        $idMetodo = (int) ($input['id_metodo'] ?? 0);
         $referencia = trim((string) ($input['referencia'] ?? ''));
-        $monto = (float) ($input['monto'] ?? 0);
+        $montoInput = trim((string) ($input['monto'] ?? ''));
+        $monedaPago = (string) ($input['moneda_pago'] ?? 'USD');
+        $tasaInput = trim((string) ($input['tasa_cambio'] ?? ''));
+        $monto = is_numeric($montoInput) ? (float) $montoInput : 0.0;
 
-        if (!in_array($metodo, ['transferencia', 'pago_movil', 'zelle', 'efectivo'], true)) {
+        if ($idMetodo <= 0) {
             out(['status' => 'error', 'message' => 'Selecciona un método de pago válido.'], 422);
         }
-        if ($metodo !== 'efectivo' && $referencia === '') {
+        $stmt = $pdo->prepare('SELECT codigo, requiere_referencia FROM metodos_pago WHERE id_metodo = ? AND activo = 1');
+        $stmt->execute([$idMetodo]);
+        $metodo = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$metodo) {
+            out(['status' => 'error', 'message' => 'Selecciona un método de pago válido.'], 422);
+        }
+        if ((int) $metodo['requiere_referencia'] === 1 && $referencia === '') {
             out(['status' => 'error', 'message' => 'Indica el número de referencia de tu pago.'], 422);
         }
         if ($monto <= 0) {
             out(['status' => 'error', 'message' => 'El monto debe ser mayor que cero.'], 422);
+        }
+        if (!in_array($monedaPago, ['USD', 'VES'], true)) {
+            out(['status' => 'error', 'message' => 'Selecciona USD o VES como moneda de pago.'], 422);
+        }
+        $tasaCambio = $tasaInput !== '' && is_numeric($tasaInput) ? (float) $tasaInput : null;
+        if ($monedaPago === 'VES' && ($tasaCambio === null || $tasaCambio <= 0)) {
+            out(['status' => 'error', 'message' => 'Indica una tasa de cambio válida para pagos en VES.'], 422);
+        }
+        if ($monedaPago === 'USD') {
+            $tasaCambio = null;
+        }
+
+        $comprobante = $_FILES['comprobante'] ?? null;
+        if (!is_array($comprobante) || ($comprobante['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            out(['status' => 'error', 'message' => 'Adjunta el comprobante del pago.'], 422);
+        }
+        if (($comprobante['size'] ?? 0) <= 0 || $comprobante['size'] > 5 * 1024 * 1024) {
+            out(['status' => 'error', 'message' => 'El comprobante debe pesar menos de 5 MB.'], 422);
+        }
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = $finfo->file($comprobante['tmp_name']);
+        $extensiones = ['application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png'];
+        if (!isset($extensiones[$mime])) {
+            out(['status' => 'error', 'message' => 'Usa un comprobante PDF, JPG o PNG.'], 422);
         }
 
         $stmt = $pdo->prepare('SELECT f.id_factura, f.id_servicio, f.monto, f.estado
@@ -189,9 +237,36 @@ try {
             out(['status' => 'error', 'message' => 'Ya tienes un pago en revisión para esta factura.'], 409);
         }
 
-        $pdo->prepare("INSERT INTO pagos (id_factura, id_cliente, id_servicio, monto, fecha_pago, metodo_pago, referencia_bancaria, estado, origen)
-                       VALUES (?, ?, ?, ?, NOW(), ?, ?, 'pendiente', 'portal_cliente')")
-            ->execute([$idFactura, $idCliente, $factura['id_servicio'], $monto, $metodo, $referencia !== '' ? $referencia : null]);
+        $directorio = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'redytelca_uploads' . DIRECTORY_SEPARATOR . 'comprobantes';
+        if (!is_dir($directorio) && !mkdir($directorio, 0700, true) && !is_dir($directorio)) {
+            out(['status' => 'error', 'message' => 'No se pudo preparar el almacenamiento del comprobante.'], 500);
+        }
+        $nombreArchivo = bin2hex(random_bytes(16)) . '.' . $extensiones[$mime];
+        $rutaArchivo = $directorio . DIRECTORY_SEPARATOR . $nombreArchivo;
+        if (!move_uploaded_file($comprobante['tmp_name'], $rutaArchivo)) {
+            out(['status' => 'error', 'message' => 'No se pudo guardar el comprobante.'], 500);
+        }
+
+        try {
+            $stmt = $pdo->prepare("INSERT INTO pagos (id_factura, id_cliente, id_servicio, monto, moneda_pago, tasa_cambio, fecha_pago, id_metodo, referencia_bancaria, comprobante_path, estado, origen)
+                                   VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, 'pendiente', 'portal_cliente')");
+            $stmt->execute([
+                $idFactura,
+                $idCliente,
+                $factura['id_servicio'],
+                $monto,
+                $monedaPago,
+                $tasaCambio,
+                $idMetodo,
+                $referencia !== '' ? $referencia : null,
+                $nombreArchivo,
+            ]);
+        } catch (Throwable $exception) {
+            if (is_file($rutaArchivo)) {
+                unlink($rutaArchivo);
+            }
+            throw $exception;
+        }
 
         out(['status' => 'success', 'message' => 'Pago reportado. El equipo de REDYTELCA lo validará en breve.']);
     }
@@ -220,8 +295,9 @@ try {
     if ($action === 'password') {
         $actual = (string) ($input['actual'] ?? '');
         $nueva = (string) ($input['nueva'] ?? '');
-        if (strlen($nueva) < 6) {
-            out(['status' => 'error', 'message' => 'La nueva contraseña debe tener al menos 6 caracteres.'], 422);
+        $longitudNueva = mb_strlen($nueva, 'UTF-8');
+        if ($longitudNueva < 15 || $longitudNueva > 128) {
+            out(['status' => 'error', 'message' => 'La nueva contraseña debe tener entre 15 y 128 caracteres.'], 422);
         }
         $stmt = $pdo->prepare('SELECT id_credencial, password FROM clientes_credenciales WHERE id_cliente = ?');
         $stmt->execute([$idCliente]);
@@ -237,5 +313,7 @@ try {
 
     out(['status' => 'error', 'message' => 'Acción no válida.'], 400);
 } catch (PDOException $e) {
+    out(['status' => 'error', 'message' => 'Error interno al procesar la solicitud.'], 500);
+} catch (Throwable $e) {
     out(['status' => 'error', 'message' => 'Error interno al procesar la solicitud.'], 500);
 }

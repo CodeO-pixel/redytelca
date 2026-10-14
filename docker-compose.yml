@@ -9,6 +9,9 @@ services:
       DB_NAME: ${DB_NAME:-redytelca}
       DB_USER: ${DB_USER:-redytelca}
       DB_PASS: ${DB_PASS:-redytelca_pass}
+      REDYTELCA_INITIAL_ADMIN_USERNAME: ${REDYTELCA_INITIAL_ADMIN_USERNAME:-}
+      REDYTELCA_INITIAL_ADMIN_EMAIL: ${REDYTELCA_INITIAL_ADMIN_EMAIL:-}
+      REDYTELCA_INITIAL_ADMIN_PASSWORD: ${REDYTELCA_INITIAL_ADMIN_PASSWORD:-}
       REDYTELCA_BASE_URL: ${REDYTELCA_BASE_URL:-http://localhost:8080}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -32,12 +35,11 @@ services:
       MYSQL_USER: ${DB_USER:-redytelca}
       MYSQL_PASSWORD: ${DB_PASS:-redytelca_pass}
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS:-root_pass}
-    # bd.sql ya trae el esquema completo (incluye las tablas RBAC:
-    # rol, permissions, role_permission, rol_modulo_pagina, sesiones, etc.),
-    # así que basta con importarlo una vez al crear el contenedor.
+    # El esquema versionable y sin datos privados es la fuente de instalación.
     volumes:
       - db_data:/var/lib/mysql
-      - ./bd.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./bd_redytelca_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./bd_redytelca_seed.sql:/docker-entrypoint-initdb.d/02-rbac-seed.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASS:-root_pass}"]
       interval: 5s

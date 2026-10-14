@@ -5,31 +5,40 @@ $staffSession = requirePageAccess($pdo, 'pagos');
 
 $method = $_SERVER['REQUEST_METHOD'];
 
-/**
- * Salvaguarda mínima: `pagos` ya vive reestructurada en el dump vigente
- * (id_factura, id_usuario_valido, origen). Este bloque solo protege
- * instalaciones que aún no corrieron el dump actual.
- */
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS pagos (
-        id_pago INT AUTO_INCREMENT PRIMARY KEY,
-        id_factura INT NULL,
-        id_cliente INT NOT NULL,
-        id_servicio INT NOT NULL,
-        monto DECIMAL(10,2) NOT NULL,
-        fecha_pago DATETIME NOT NULL,
-        metodo_pago ENUM('transferencia','pago_movil','zelle','efectivo') DEFAULT NULL,
-        referencia_bancaria VARCHAR(255) DEFAULT NULL,
-        estado ENUM('pendiente','validado','rechazado') DEFAULT 'pendiente',
-        fecha_validacion DATETIME DEFAULT NULL,
-        id_usuario_valido INT DEFAULT NULL,
-        origen ENUM('portal_cliente','backoffice') DEFAULT 'backoffice',
-        CONSTRAINT fk_pago_factura FOREIGN KEY (id_factura) REFERENCES facturas(id_factura),
-        CONSTRAINT fk_pago_cliente FOREIGN KEY (id_cliente) REFERENCES clientes(id_cliente),
-        CONSTRAINT fk_pago_servicio FOREIGN KEY (id_servicio) REFERENCES servicios(id_servicio),
-        CONSTRAINT fk_pago_usuario FOREIGN KEY (id_usuario_valido) REFERENCES usuarios(id_usuario)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-} catch (Exception $e) {
+if ($method === 'GET' && isset($_GET['comprobante'])) {
+    requireOperation($pdo, 'pagos', 'leer');
+    $idPago = filter_var($_GET['comprobante'], FILTER_VALIDATE_INT);
+    if (!$idPago || $idPago < 1) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Pago inválido.']);
+        exit;
+    }
+
+    $stmt = $pdo->prepare('SELECT comprobante_path FROM pagos WHERE id_pago = ?');
+    $stmt->execute([$idPago]);
+    $nombreArchivo = $stmt->fetchColumn();
+    if (!is_string($nombreArchivo) || !preg_match('/^[a-f0-9]{32}\.(pdf|jpg|png)$/', $nombreArchivo)) {
+        http_response_code(404);
+        echo json_encode(['status' => 'error', 'message' => 'No hay comprobante para este pago.']);
+        exit;
+    }
+
+    $directorio = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'redytelca_uploads' . DIRECTORY_SEPARATOR . 'comprobantes';
+    $rutaArchivo = $directorio . DIRECTORY_SEPARATOR . $nombreArchivo;
+    if (!is_file($rutaArchivo)) {
+        http_response_code(404);
+        echo json_encode(['status' => 'error', 'message' => 'El comprobante no está disponible.']);
+        exit;
+    }
+
+    $mimePorExtension = ['pdf' => 'application/pdf', 'jpg' => 'image/jpeg', 'png' => 'image/png'];
+    $extension = pathinfo($nombreArchivo, PATHINFO_EXTENSION);
+    header('Content-Type: ' . $mimePorExtension[$extension]);
+    header('Content-Disposition: inline; filename="comprobante-' . $idPago . '.' . $extension . '"');
+    header('Content-Length: ' . filesize($rutaArchivo));
+    header('X-Content-Type-Options: nosniff');
+    readfile($rutaArchivo);
+    exit;
 }
 
 /**
@@ -74,16 +83,19 @@ function reconciliarFactura(PDO $pdo, ?int $idFactura): void {
 }
 
 if ($method === 'GET') {
+    requireOperation($pdo, 'pagos', 'leer');
     $stmt = $pdo->query("SELECT pg.*,
                                 c.nombres, c.apellidos, c.cedula,
                                 s.direccion_texto,
                                 f.periodo AS factura_periodo, f.monto AS factura_monto, f.estado AS factura_estado,
-                                u.username AS validado_por
+                                u.username AS validado_por,
+                                mp.codigo AS metodo_codigo, mp.nombre AS metodo_nombre
                          FROM pagos pg
                          INNER JOIN clientes c ON c.id_cliente = pg.id_cliente
                          INNER JOIN servicios s ON s.id_servicio = pg.id_servicio
                          LEFT JOIN facturas f ON f.id_factura = pg.id_factura
                          LEFT JOIN usuarios u ON u.id_usuario = pg.id_usuario_valido
+                         LEFT JOIN metodos_pago mp ON mp.id_metodo = pg.id_metodo
                          ORDER BY pg.fecha_pago DESC");
     echo json_encode(['status' => 'success', 'pagos' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
     exit;
@@ -95,13 +107,34 @@ if (!$input) {
 }
 
 if ($method === 'POST') {
+    requireOperation($pdo, 'pagos', 'crear');
     $id_factura = isset($input['id_factura']) && $input['id_factura'] !== '' ? (int)$input['id_factura'] : null;
     $id_cliente = (int)($input['id_cliente'] ?? 0);
     $id_servicio = (int)($input['id_servicio'] ?? 0);
     $monto = isset($input['monto']) && $input['monto'] !== '' ? (float)$input['monto'] : null;
     $fecha_pago = trim($input['fecha_pago'] ?? '');
-    $metodo_pago = trim($input['metodo_pago'] ?? '');
+    $id_metodo = isset($input['id_metodo']) && $input['id_metodo'] !== '' ? (int)$input['id_metodo'] : null;
     $referencia_bancaria = trim($input['referencia_bancaria'] ?? '');
+    $moneda_pago = trim($input['moneda_pago'] ?? 'USD');
+    if (!in_array($moneda_pago, ['USD', 'VES'], true)) {
+        $moneda_pago = 'USD';
+    }
+    $tasa_cambio = isset($input['tasa_cambio']) ? ($input['tasa_cambio'] !== '' ? (float)$input['tasa_cambio'] : null) : null;
+    if ($moneda_pago === 'VES' && ($tasa_cambio === null || $tasa_cambio <= 0)) {
+        echo json_encode(['status' => 'error', 'message' => 'Si la moneda de pago es VES, la tasa de cambio es obligatoria y debe ser mayor a 0.']);
+        exit;
+    }
+    if ($moneda_pago === 'USD') {
+        $tasa_cambio = null;
+    }
+    $comprobante_path = trim($input['comprobante_path'] ?? '');
+    if ($comprobante_path === '') {
+        $comprobante_path = null;
+    }
+    $motivo_rechazo = trim($input['motivo_rechazo'] ?? '');
+    if ($motivo_rechazo === '') {
+        $motivo_rechazo = null;
+    }
     // Todo pago creado desde el backoffice nace 'pendiente' por defecto,
     // igual que uno creado desde el futuro portal de cliente (Fase 5):
     // la validación es siempre un acto explícito y posterior de Admin.
@@ -116,38 +149,46 @@ if ($method === 'POST') {
         exit;
     }
 
-    $metodosValidos = ['transferencia', 'pago_movil', 'zelle', 'efectivo'];
-    if ($metodo_pago !== '' && !in_array($metodo_pago, $metodosValidos, true)) {
-        $metodo_pago = '';
+    if ($id_metodo !== null) {
+        $stmtMp = $pdo->prepare("SELECT id_metodo FROM metodos_pago WHERE id_metodo = ? AND activo = 1");
+        $stmtMp->execute([$id_metodo]);
+        if (!$stmtMp->fetch()) {
+            echo json_encode(['status' => 'error', 'message' => 'El método de pago seleccionado no es válido o está inactivo.']);
+            exit;
+        }
     }
 
     try {
-        $stmt = $pdo->prepare("INSERT INTO pagos (id_factura, id_cliente, id_servicio, monto, fecha_pago, metodo_pago, referencia_bancaria, estado, origen)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO pagos (id_factura, id_cliente, id_servicio, monto, fecha_pago, id_metodo, referencia_bancaria, moneda_pago, tasa_cambio, comprobante_path, motivo_rechazo, estado, origen)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $ok = $stmt->execute([
             $id_factura,
             $id_cliente,
             $id_servicio,
             $monto,
             $fecha_pago,
-            $metodo_pago ?: null,
+            $id_metodo,
             $referencia_bancaria ?: null,
+            $moneda_pago,
+            $tasa_cambio,
+            $comprobante_path,
+            $motivo_rechazo,
             $estado,
             $origen
         ]);
-        echo json_encode(['status' => $ok ? 'success' : 'error', 'message' => $ok ? 'Pago registrado correctamente, pendiente de validación' : 'No se pudo registrar el pago']);
-    } catch (PDOException $e) {
+        echo json_encode(['status' => $ok ? 'success' : 'error', 'message' => $ok ? 'Pago registrado correctamente, pendiente de validación' : 'No se pudo registrar el pago']);    } catch (PDOException $e) {
         $sqlCode = (int) ($e->errorInfo[1] ?? 0);
         if ($sqlCode === 1452) {
             echo json_encode(['status' => 'error', 'message' => 'El cliente, servicio o factura seleccionados no son válidos.']);
         } else {
-            echo json_encode(['status' => 'error', 'message' => 'Error registrando el pago: ' . $e->getMessage()]);
+            echo json_encode(['status' => 'error', 'message' => 'Error al registrar el pago. Contacta al administrador si persiste.']);
         }
     }
     exit;
 }
 
 if ($method === 'PUT') {
+    requireOperation($pdo, 'pagos', 'editar');
     $id = (int)($input['id_pago'] ?? 0);
     if ($id <= 0) {
         echo json_encode(['status' => 'error', 'message' => 'Pago inválido']);
@@ -168,7 +209,8 @@ if ($method === 'PUT') {
         $nuevoEstado = $pagoActual['estado'];
     }
 
-    $cambioDeEstadoSensible = $nuevoEstado !== $pagoActual['estado'] && in_array($nuevoEstado, ['validado', 'rechazado'], true);
+    $estadosSensibles = ['validado', 'rechazado', 'pendiente'];
+    $cambioDeEstadoSensible = $nuevoEstado !== $pagoActual['estado'] && in_array($nuevoEstado, $estadosSensibles, true);
 
     // PROMPT 14: la visibilidad del módulo Pagos ya es configurable por el
     // Admin vía rol_modulo_pagina (ver requirePageAccess() en el gate de
@@ -178,34 +220,69 @@ if ($method === 'PUT') {
     // resuelve verificando roleId===1 explícitamente). Un Operador con la
     // página Pagos habilitada puede listar/crear/editar campos no
     // sensibles, pero nunca puede mover el estado a validado/rechazado.
-    if ($cambioDeEstadoSensible && (int) $staffSession['id_rol'] !== 1) {
+    if ($cambioDeEstadoSensible && !in_array(1, $staffSession['roles'], true)) {
         http_response_code(403);
         echo json_encode(['status' => 'error', 'message' => 'Solo un Administrador puede validar o rechazar un pago.']);
         exit;
     }
 
     $id_factura = isset($input['id_factura']) && $input['id_factura'] !== '' ? (int)$input['id_factura'] : null;
-    $id_cliente = (int)($input['id_cliente'] ?? $pagoActual['id_cliente']);
-    $id_servicio = (int)($input['id_servicio'] ?? $pagoActual['id_servicio']);
+    $id_cliente = (int) $pagoActual['id_cliente'];
+    $id_servicio = (int) $pagoActual['id_servicio'];
     $monto = isset($input['monto']) && $input['monto'] !== '' ? (float)$input['monto'] : (float)$pagoActual['monto'];
     $fecha_pago = trim($input['fecha_pago'] ?? $pagoActual['fecha_pago']);
-    $metodo_pago = trim($input['metodo_pago'] ?? ($pagoActual['metodo_pago'] ?? ''));
+    $id_metodo = array_key_exists('id_metodo', $input)
+        ? ($input['id_metodo'] !== '' ? (int)$input['id_metodo'] : null)
+        : ($pagoActual['id_metodo'] !== null ? (int)$pagoActual['id_metodo'] : null);
     $referencia_bancaria = trim($input['referencia_bancaria'] ?? ($pagoActual['referencia_bancaria'] ?? ''));
+    $moneda_pago = trim($input['moneda_pago'] ?? ($pagoActual['moneda_pago'] ?? 'USD'));
+    if (!in_array($moneda_pago, ['USD', 'VES'], true)) {
+        $moneda_pago = 'USD';
+    }
+    if (array_key_exists('tasa_cambio', $input)) {
+        $tasa_cambio = $input['tasa_cambio'] !== '' ? (float)$input['tasa_cambio'] : null;
+    } else {
+        $tasa_cambio = $pagoActual['tasa_cambio'] !== null ? (float)$pagoActual['tasa_cambio'] : null;
+    }
+    if ($moneda_pago === 'VES' && ($tasa_cambio === null || $tasa_cambio <= 0)) {
+        echo json_encode(['status' => 'error', 'message' => 'Si la moneda de pago es VES, la tasa de cambio es obligatoria y debe ser mayor a 0.']);
+        exit;
+    }
+    if ($moneda_pago === 'USD') {
+        $tasa_cambio = null;
+    }
+    $comprobante_path = trim($input['comprobante_path'] ?? ($pagoActual['comprobante_path'] ?? ''));
+    if ($comprobante_path === '') {
+        $comprobante_path = null;
+    }
+    $motivo_rechazo = trim($input['motivo_rechazo'] ?? ($pagoActual['motivo_rechazo'] ?? ''));
+    if ($motivo_rechazo === '') {
+        $motivo_rechazo = null;
+    }
 
-    $metodosValidos = ['transferencia', 'pago_movil', 'zelle', 'efectivo'];
-    if ($metodo_pago !== '' && !in_array($metodo_pago, $metodosValidos, true)) {
-        $metodo_pago = '';
+    if ($id_metodo !== null) {
+        $stmtMp = $pdo->prepare("SELECT id_metodo FROM metodos_pago WHERE id_metodo = ? AND activo = 1");
+        $stmtMp->execute([$id_metodo]);
+        if (!$stmtMp->fetch()) {
+            echo json_encode(['status' => 'error', 'message' => 'El método de pago seleccionado no es válido o está inactivo.']);
+            exit;
+        }
     }
 
     $pdo->beginTransaction();
     try {
         if ($cambioDeEstadoSensible) {
             $idUsuarioValido = $staffSession['id_usuario'];
-            $stmt = $pdo->prepare("UPDATE pagos SET id_factura = ?, id_cliente = ?, id_servicio = ?, monto = ?, fecha_pago = ?, metodo_pago = ?, referencia_bancaria = ?, estado = ?, fecha_validacion = NOW(), id_usuario_valido = ? WHERE id_pago = ?");
-            $stmt->execute([$id_factura, $id_cliente, $id_servicio, $monto, $fecha_pago, $metodo_pago ?: null, $referencia_bancaria ?: null, $nuevoEstado, $idUsuarioValido, $id]);
+            $stmt = $pdo->prepare("UPDATE pagos SET id_factura = ?, id_cliente = ?, id_servicio = ?, monto = ?, fecha_pago = ?, id_metodo = ?, referencia_bancaria = ?, moneda_pago = ?, tasa_cambio = ?, comprobante_path = ?, motivo_rechazo = ?, estado = ?, fecha_validacion = NOW(), id_usuario_valido = ? WHERE id_pago = ?");
+            $stmt->execute([$id_factura, $id_cliente, $id_servicio, $monto, $fecha_pago, $id_metodo, $referencia_bancaria ?: null, $moneda_pago, $tasa_cambio, $comprobante_path, $motivo_rechazo, $nuevoEstado, $idUsuarioValido, $id]);
         } else {
-            $stmt = $pdo->prepare("UPDATE pagos SET id_factura = ?, id_cliente = ?, id_servicio = ?, monto = ?, fecha_pago = ?, metodo_pago = ?, referencia_bancaria = ?, estado = ? WHERE id_pago = ?");
-            $stmt->execute([$id_factura, $id_cliente, $id_servicio, $monto, $fecha_pago, $metodo_pago ?: null, $referencia_bancaria ?: null, $nuevoEstado, $id]);
+            if (in_array(1, $staffSession['roles'], true)) {
+                $stmt = $pdo->prepare("UPDATE pagos SET id_factura = ?, id_cliente = ?, id_servicio = ?, monto = ?, fecha_pago = ?, id_metodo = ?, referencia_bancaria = ?, moneda_pago = ?, tasa_cambio = ?, comprobante_path = ?, motivo_rechazo = ?, estado = ? WHERE id_pago = ?");
+                $stmt->execute([$id_factura, $id_cliente, $id_servicio, $monto, $fecha_pago, $id_metodo, $referencia_bancaria ?: null, $moneda_pago, $tasa_cambio, $comprobante_path, $motivo_rechazo, $nuevoEstado, $id]);
+            } else {
+                $stmt = $pdo->prepare("UPDATE pagos SET id_metodo = ?, referencia_bancaria = ?, comprobante_path = ?, motivo_rechazo = ?, estado = ? WHERE id_pago = ?");
+                $stmt->execute([$id_metodo, $referencia_bancaria ?: null, $comprobante_path, $motivo_rechazo, $nuevoEstado, $id]);
+            }
         }
 
         // Reconciliar tanto la factura anterior (si el pago se reasignó a
@@ -223,17 +300,20 @@ if ($method === 'PUT') {
         $sqlCode = (int) ($e->errorInfo[1] ?? 0);
         if ($sqlCode === 1452) {
             echo json_encode(['status' => 'error', 'message' => 'El cliente, servicio o factura seleccionados no son válidos.']);
+        } elseif ($sqlCode === 1644) {
+            echo json_encode(['status' => 'error', 'message' => $e->errorInfo[2] ?: 'La transición de estado no es válida para este pago.']);
         } else {
-            echo json_encode(['status' => 'error', 'message' => 'Error actualizando el pago: ' . $e->getMessage()]);
+            echo json_encode(['status' => 'error', 'message' => 'Error al actualizar el pago. Contacta al administrador si persiste.']);
         }
     } catch (Exception $e) {
         $pdo->rollBack();
-        echo json_encode(['status' => 'error', 'message' => 'Error actualizando el pago: ' . $e->getMessage()]);
+        echo json_encode(['status' => 'error', 'message' => 'Error al actualizar el pago. Contacta al administrador si persiste.']);
     }
     exit;
 }
 
 if ($method === 'DELETE') {
+    requireOperation($pdo, 'pagos', 'eliminar');
     $id = (int)($_GET['id'] ?? 0);
     if ($id <= 0) {
         echo json_encode(['status' => 'error', 'message' => 'Pago inválido']);
@@ -249,8 +329,7 @@ if ($method === 'DELETE') {
     }
 
     // Un pago ya validado no se elimina físicamente: rompería la
-    // trazabilidad contable frente a la factura conciliada. La vía
-    // correcta es rechazarlo (PUT estado='rechazado') si fue un error.
+    // trazabilidad contable. La vía correcta es rechazarlo (PUT estado='rechazado') si fue un error.
     if ($pagoActual['estado'] === 'validado') {
         echo json_encode(['status' => 'error', 'message' => 'No se puede eliminar un pago ya validado. Márcalo como rechazado si fue un error, para preservar la trazabilidad contable.']);
         exit;
@@ -264,7 +343,7 @@ if ($method === 'DELETE') {
         }
         echo json_encode(['status' => $ok ? 'success' : 'error', 'message' => $ok ? 'Pago eliminado' : 'No se pudo eliminar']);
     } catch (Exception $e) {
-        echo json_encode(['status' => 'error', 'message' => 'No se pudo eliminar el pago: ' . $e->getMessage()]);
+        echo json_encode(['status' => 'error', 'message' => 'Error al eliminar el pago. Contacta al administrador si persiste.']);
     }
     exit;
 }
@@ -273,3 +352,12 @@ echo json_encode(['status' => 'error', 'message' => 'Método no soportado']);
 // Corrección: `id_usuario_valido` ahora se toma de la sesión autenticada
 // del administrador que ya pasó `requireStaffAuth($pdo, 1)`, evitando que
 // el body HTTP manipule la auditoría del pago en la columna financiera.
+
+// ============================================================================
+// CAMBIOS APLICADOS EN ESTA REVISIÓN
+// ============================================================================
+// 1. BUG 1 (AUD-2026-B05): Se incluyó 'pendiente' en $estadosSensibles para evitar que un no-admin revierta pagos validados.
+// 2. BUG 2 (AUD-2026-B23): $id_cliente e $id_servicio ahora se toman siempre de $pagoActual, ignorando el body HTTP.
+// 3. BUG 3 (AUD-2026-B26): En la rama no-sensible, se restringió la actualización de campos financieros (monto, factura, etc.) solo para administradores.
+// 4. BUG 4 (AUD-2026-B10): Se eliminó la fuga de información de $e->getMessage() en los bloques catch de POST, PUT y DELETE.
+// ============================================================================

@@ -1,4 +1,9 @@
 <?php
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("Este script solo puede ejecutarse desde CLI.\n");
+}
+
 require 'conexion.php';
 
 // NOTA: este script apuntaba antes a "migrations/002_rbac_dinamico_seed.sql",

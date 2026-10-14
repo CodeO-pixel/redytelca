@@ -9,21 +9,15 @@
    la conexión a la base de datos fallaba siempre. Lo corregí para que
    lea host/usuario/clave/puerto de variables de entorno, con valores
    por defecto que apuntan al contenedor de MySQL de docker-compose.
-2. **`run_migrations.php` apuntaba a un archivo que no existe**
-   (`migrations/002_rbac_dinamico_seed.sql`) — el proyecto solo trae
-   `001_create_rbac_tables.sql`. Ejecutar ese script fallaba siempre con
-   "archivo no encontrado". Ya no hace falta ejecutarlo para una
-   instalación nueva porque `bd.sql` ya trae el esquema
-   completo (incluye `rol`, `permissions`, `role_permission`,
-   `rol_modulo_pagina`, `sesiones`, etc.), pero lo dejé apuntando al
-   archivo que sí existe (es idempotente, no rompe nada si lo corres).
+2. **La instalación limpia importaba un esquema legado con datos.** Ahora
+  usa `bd_redytelca_schema.sql` (DDL público y sin datos personales) y
+  `bd_redytelca_seed.sql` (catálogos RBAC mínimos). El primer
+  administrador se crea con `crear_admin_inicial.php`, solo por CLI y
+  con credenciales definidas por quien instala.
 
-No encontré errores de sintaxis PHP (no pude ejecutar `php -l` porque
-este entorno no tiene acceso a internet para instalar PHP, pero revisé
-manualmente los archivos clave: `conexion.php`, `login.php`, el router,
-los controladores y modelos, y las llamadas `fetch()` del frontend). El
-resto del código —autenticación, RBAC dinámico, endpoints `api_*.php`—
-está bien y usa PDO de forma consistente en todas partes.
+La conexión PDO toma host, puerto, base, usuario y clave de `DB_HOST`,
+`DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASS`, con valores locales de
+respaldo para XAMPP.
 
 ## Algo que no toqué, pero que deberías saber
 
@@ -44,20 +38,17 @@ si no lo necesitas, es candidato a eliminar.
 1. Copia toda esta carpeta dentro de `htdocs`, por ejemplo:
    `C:\xampp\htdocs\redytelca`.
 2. Abre el Panel de Control de XAMPP y arranca **Apache** y **MySQL**.
-3. Entra a `http://localhost/phpmyadmin`, crea una base de datos nueva
-   llamada **`redytelca`** (cotejamiento `utf8mb4_general_ci`).
-4. Con esa base seleccionada, pestaña "Importar" → elige el archivo
-   `bd.sql` de este proyecto → Importar.
-5. Abre `http://localhost/redytelca/index.html` (panel admin) o
+3. Entra a `http://localhost/phpmyadmin` y crea una base de datos
+  llamada **`bd_redytelca`** con cotejamiento `utf8mb4_unicode_ci`.
+4. Importa `bd_redytelca_schema.sql` y luego `bd_redytelca_seed.sql`.
+5. Define `REDYTELCA_INITIAL_ADMIN_USERNAME`,
+  `REDYTELCA_INITIAL_ADMIN_EMAIL` y `REDYTELCA_INITIAL_ADMIN_PASSWORD`
+  en el entorno del comando PHP. La contraseña debe tener 12 caracteres
+  como mínimo. Desde la raíz del proyecto, ejecuta
+  `php crear_admin_inicial.php`; el comando solo funciona si aún no hay
+  usuarios.
+6. Abre `http://localhost/redytelca/index.html` (panel admin) o
    `http://localhost/redytelca/portal_cliente.php` (portal cliente).
-
-Ya no necesitas tocar nada más: dejé `conexion.php` con usuario `root`
-y sin clave por defecto, que es la configuración estándar de MySQL en
-XAMPP. Si tu XAMPP tiene otro usuario/clave para MySQL, edita las
-primeras líneas después del bloque CORS en `conexion.php`.
-
-Usuario admin por defecto (se autocrea en el primer login si la tabla
-`usuarios` está vacía): `admin` / `123456`.
 
 ## Opción B: Docker — explicado desde cero
 
@@ -101,12 +92,14 @@ SMTP_PASSWORD=tu-clave-o-clave-de-aplicacion
 SMTP_ENCRYPTION=tls
 SMTP_FROM_EMAIL=tu-cuenta@tu-dominio.com
 SMTP_FROM_NAME=REDYTELCA
+REDYTELCA_INITIAL_ADMIN_USERNAME=
+REDYTELCA_INITIAL_ADMIN_EMAIL=
+REDYTELCA_INITIAL_ADMIN_PASSWORD=
 ```
 
 En producción, cambia `REDYTELCA_BASE_URL` por el dominio HTTPS real.
-La creación de usuarios envía un enlace válido por 24 horas y no guarda
-la cuenta si el correo no pudo enviarse. En una base existente, ejecuta
-`php run_migrations.php` una vez para crear la tabla de tokens.
+Completa las tres variables `REDYTELCA_INITIAL_ADMIN_*` con credenciales
+únicas antes del primer arranque. No reutilices una contraseña de ejemplo.
 
 ```bash
 docker compose up --build
@@ -131,23 +124,32 @@ Este comando:
 Cuando termine, abre **http://localhost:8080** (panel admin) o
 **http://localhost:8080/cliente** (portal de cliente).
 
-Usuario admin por defecto (se autocrea en el primer login si la tabla
-`usuarios` está vacía): `admin` / `123456`.
+En otra terminal, crea el primer administrador:
 
-Para cambiar las credenciales de la base de datos, copia `.env.example`
-a `.env` y edítalo antes de correr `docker compose up`.
+```bash
+docker compose exec app php crear_admin_inicial.php
+```
+
+El comando falla de forma segura si ya existe algún usuario. Tras crearlo,
+borra `REDYTELCA_INITIAL_ADMIN_PASSWORD` del archivo `.env` y recrea la
+app con `docker compose up -d --force-recreate app` para retirar el secreto
+del entorno del contenedor.
+
+Para cambiar las credenciales de la base de datos, define `DB_HOST`,
+`DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASS` en `.env` antes de correr
+`docker compose up`.
 
 ### Reiniciar desde cero
 
-Si necesitas que el `.sql` se vuelva a importar (por ejemplo, tras
-editar `bd.sql`), borra el volumen de datos:
+Si necesitas volver a importar esquema y seed en una instalación local de
+prueba, borra el volumen de datos:
 
 ```bash
 docker compose down -v
 docker compose up --build
 ```
 
-(`-v` borra el volumen `db_data`; sin esa bandera, MySQL solo importa el
+(`-v` borra el volumen `db_data`; sin esa bandera, MySQL solo importa los
 `.sql` la primera vez que crea el volumen, no en cada arranque).
 
 ## Segunda ronda de cambios (base de datos, portal del cliente, diseño)
@@ -215,14 +217,18 @@ facturación, etc.) — esa parte ya funcionaba bien; el trabajo de esta
 ronda fue integridad de datos, el portal del cliente y que la interfaz
 se vea bien en cualquier tamaño de pantalla.
 
-## Cómo aplicar estos cambios si ya lo tienes desplegado
+## Despliegue en Render
 
-- **Docker (local):** `docker compose down -v && docker compose up --build`
-  para que se reimporte `bd.sql` con las correcciones.
-- **Render + base de datos alojada:** vuelve a importar `bd.sql`
-  en tu base de datos (reemplazando las tablas existentes), y vuelve a
-  desplegar el código (push a GitHub si Render está conectado al repo).
-- **XAMPP:** reimporta `bd.sql` desde phpMyAdmin.
+Configura `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASS` en el
+servicio. En una base nueva, importa `bd_redytelca_schema.sql` y luego
+`bd_redytelca_seed.sql`; no importes el dump local `bd_redytelca.sql` ni
+el antiguo `bd.sql`. Configura temporalmente las variables
+`REDYTELCA_INITIAL_ADMIN_USERNAME`, `REDYTELCA_INITIAL_ADMIN_EMAIL` y
+`REDYTELCA_INITIAL_ADMIN_PASSWORD`, ejecuta `php crear_admin_inicial.php`
+desde el Shell de Render y elimina esas variables al terminar.
+
+Para actualizar una base existente no importes el esquema completo encima:
+usa las migraciones correspondientes y conserva un backup previo.
 
 
 ## Cuarta ronda de cambios (frontend: logos, dashboard, mapa, móvil)

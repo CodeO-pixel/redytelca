@@ -2,6 +2,7 @@
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
 requirePageAccess($pdo, 'clientes');
+requireOperation($pdo, 'clientes', 'crear');
 
 /**
  * CORRECCIÓN FASE 2.5: se mantiene la creación del PRIMER servicio en el
@@ -13,12 +14,6 @@ requirePageAccess($pdo, 'clientes');
  * (módulo "Servicios" en la ficha del cliente), no reutilizando este
  * endpoint ni cliente_actualizar.php.
  */
-
-try {
-    $pdo->exec("INSERT IGNORE INTO planes (id_plan, nombre, velocidad, precio_mensual, moneda)
-                VALUES (1, 'Plan Básico', '10 Mbps', 15.00, 'USD')");
-} catch (Exception $e) {
-}
 
 $input = file_get_contents('php://input');
 $data = json_decode($input, true);
@@ -66,7 +61,7 @@ try {
     if ($direccionTexto !== '' || $idNap !== null || $latitud !== null || $longitud !== null) {
         $stmtServicio = $pdo->prepare(
             "INSERT INTO servicios (estado_comercial, id_cliente, id_plan, alias, direccion_texto, id_naps, latitud_instalacion, longitud_instalacion)
-             VALUES ('activo', ?, 1, 'Principal', ?, ?, ?, ?)"
+             VALUES ('pendiente', ?, 1, 'Principal', ?, ?, ?, ?)"
         );
         $stmtServicio->execute([$idCliente, $direccionTexto, $idNap, $latitud, $longitud]);
     }

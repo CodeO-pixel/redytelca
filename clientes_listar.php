@@ -2,6 +2,7 @@
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
 requirePageAccess($pdo, 'clientes');
+requireOperation($pdo, 'clientes', 'leer');
 
 /**
  * CORRECCIÓN FASE 2.5: el JOIN anterior traía únicamente el servicio MÁS
@@ -33,6 +34,7 @@ try {
     // solo para mostrar algo representativo en la fila de la tabla.
     $joinSql = "
         FROM clientes c
+        LEFT JOIN clientes_credenciales cc ON cc.id_cliente = c.id_cliente
         LEFT JOIN servicios s ON s.id_servicio = (
             SELECT s2.id_servicio FROM servicios s2 WHERE s2.id_cliente = c.id_cliente ORDER BY s2.id_servicio ASC LIMIT 1
         )
@@ -71,6 +73,7 @@ try {
     $offset = ($page - 1) * $perPage;
 
     $query = "SELECT c.id_cliente, c.nombres, c.apellidos, c.cedula, c.num_telefono, c.correo, c.fecha_registro,
+                     cc.estado AS portal_estado, cc.must_change_password AS portal_must_change_password,
                      COALESCE(s.direccion_texto, '') AS direccion,
                      s.id_servicio, s.estado_comercial, s.id_naps,
                      na.codigo AS nap_codigo,

@@ -15,28 +15,8 @@ $method = $_SERVER['REQUEST_METHOD'];
  * tocar la red real (sin SNMP/TR-069/API propietaria), consistente con
  * la decisión de alcance de tesis documentada.
  */
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS equipos (
-        id_equipo INT AUTO_INCREMENT PRIMARY KEY,
-        tipo ENUM('ONU','ONT','ROUTER') NOT NULL,
-        marca VARCHAR(50) DEFAULT NULL,
-        modelo VARCHAR(50) DEFAULT NULL,
-        direccion_mac CHAR(17) NOT NULL,
-        num_puerto_nap TINYINT(4) NOT NULL,
-        estado_fisico ENUM('operativo','averiado','stock') DEFAULT 'stock',
-        propiedad ENUM('cliente','empresa') NOT NULL DEFAULT 'empresa',
-        id_naps INT(11) NOT NULL,
-        id_servicio INT(11) DEFAULT NULL,
-        UNIQUE KEY direccion_mac (direccion_mac),
-        UNIQUE KEY idx_nap_puerto (id_naps, num_puerto_nap),
-        UNIQUE KEY id_servicio (id_servicio),
-        CONSTRAINT fk_equipo_nap FOREIGN KEY (id_naps) REFERENCES naps(id_nap),
-        CONSTRAINT fk_equipo_srv FOREIGN KEY (id_servicio) REFERENCES servicios(id_servicio) ON DELETE SET NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-} catch (Exception $e) {
-}
-
 if ($method === 'GET') {
+    requireOperation($pdo, 'equipos', 'leer');
     // total_naps_puertos_ocupados en el desglose por NAP se calcula desde
     // api_naps.php (no aquí); este endpoint devuelve el detalle completo
     // de cada equipo con su NAP/OLT/Nodo y, si está asignado, el cliente.
@@ -71,6 +51,7 @@ function macEsValida(string $mac): bool {
 }
 
 if ($method === 'POST') {
+    requireOperation($pdo, 'equipos', 'crear');
     $tipo = trim($input['tipo'] ?? '');
     $marca = trim($input['marca'] ?? '');
     $modelo = trim($input['modelo'] ?? '');
@@ -131,7 +112,7 @@ if ($method === 'POST') {
                 ? 'Ya existe un equipo registrado con esa dirección MAC.'
                 : (str_contains($e->getMessage(), 'idx_nap_puerto')
                     ? 'Ese puerto de la NAP ya está ocupado por otro equipo.'
-                    : 'Ese servicio ya tiene un equipo asignado. Un servicio solo puede tener un equipo activo a la vez.');
+                    : 'Ya existe un equipo con ese número de serie.');
             echo json_encode(['status' => 'error', 'message' => $mensaje]);
         } elseif ($sqlCode === 1452) {
             echo json_encode(['status' => 'error', 'message' => 'La NAP o el servicio seleccionados no son válidos.']);
@@ -143,6 +124,7 @@ if ($method === 'POST') {
 }
 
 if ($method === 'PUT') {
+    requireOperation($pdo, 'equipos', 'editar');
     $id = (int) ($input['id_equipo'] ?? 0);
     if ($id <= 0) {
         echo json_encode(['status' => 'error', 'message' => 'Equipo inválido']);
@@ -208,7 +190,7 @@ if ($method === 'PUT') {
                 ? 'Ya existe otro equipo con esa dirección MAC.'
                 : (str_contains($e->getMessage(), 'idx_nap_puerto')
                     ? 'Ese puerto de la NAP ya está ocupado por otro equipo.'
-                    : 'Ese servicio ya tiene otro equipo asignado.');
+                    : 'Ya existe otro equipo con ese número de serie.');
             echo json_encode(['status' => 'error', 'message' => $mensaje]);
         } elseif ($sqlCode === 1452) {
             echo json_encode(['status' => 'error', 'message' => 'La NAP o el servicio seleccionados no son válidos.']);
@@ -220,6 +202,7 @@ if ($method === 'PUT') {
 }
 
 if ($method === 'DELETE') {
+    requireOperation($pdo, 'equipos', 'eliminar');
     $id = (int) ($_GET['id'] ?? 0);
     if ($id <= 0) {
         echo json_encode(['status' => 'error', 'message' => 'Equipo inválido']);

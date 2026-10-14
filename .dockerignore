@@ -1,0 +1,5 @@
+.git
+docs
+*.rar
+*.zip
+.env

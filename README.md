@@ -1,34 +1,71 @@
-# REDYTELCA - Documentación rápida
+# REDYTELCA
 
-Resumen de configuración y arquitectura:
+Sistema de gestión para ISPs (Proveedores de Servicios de Internet). Proyecto de tesis.
 
-1) Estructura y navegación del menú
-- Secciones principales: "Descripción", "Menú" y "Principal".
-- Sección "Configuraciones" para parámetros globales (empresa, apariencia, reglas del sistema).
-- El menú muestra solo opciones permitidas por el rol del usuario.
+Backend PHP 8.2 + PDO + MariaDB. Frontend vanilla JS sin build tools. Uso interno (staff del ISP) y portal de clientes.
 
-2) Gestión de la empresa
-- Datos básicos: logo, nombre y colores corporativos se deben almacenar y aplicar dinámicamente.
+## Stack
 
-3) Administración de usuarios y roles
-- Roles (p.ej. Administrador, Operador) con permisos granulares por módulo y operación.
-- Usuarios vinculados a roles; permisos efectivos = unión de permisos de roles.
+- PHP 8.2 (XAMPP)
+- MariaDB 10.4
+- HTML, CSS, JavaScript puro (sin npm, sin bundler)
 
-4) Diseño de la interfaz (Grid y paginación)
-- Implementar Grid con columnas configurables y paginación del lado del servidor para grandes volúmenes.
+## Arranque local
 
-5) Gestión de base de datos
-- Tablas principales sugeridas: usuarios, roles, permisos, rol_permiso, usuario_rol, clientes.
-- Mantener integridad referencial y esquemas claros (actualizar ER cuando se modifiquen tablas).
+```bash
+# Crear la BD e importar esquema y permisos (sin datos de clientes)
+mysql -u root -e "CREATE DATABASE bd_redytelca CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+mysql -u root bd_redytelca < bd_redytelca_schema.sql
+mysql -u root bd_redytelca < bd_redytelca_seed.sql
 
-6) Seguridad y Sesiones
-- Usar tokens (JWT) con expiración; almacenar en LocalStorage/SessionStorage con limpieza al cerrar sesión.
-- Validar permisos en el servidor y transmitir siempre por HTTPS.
+# Con REDYTELCA_INITIAL_ADMIN_USERNAME, REDYTELCA_INITIAL_ADMIN_EMAIL y
+# REDYTELCA_INITIAL_ADMIN_PASSWORD definidas en el entorno:
+php crear_admin_inicial.php
 
----
+# Iniciar la aplicación
+php -S localhost:8000
+```
 
-Este README fue generado automáticamente a partir de DOCUMENTACION.md y se agregó una página de "configuraciones" mínima (configuraciones.php) y mejoras en la gestión de sesión del cliente (app.js) para almacenar/limpiar un token local y rol en LocalStorage. Integre el guardado en servidor cuando esté listo.
+Abrir `http://localhost:8000` en el navegador.
 
-Fecha: 2026-06-20
+## Despliegue en Render
 
-Mejoras detalladas y plan de trabajo en IMPROVEMENTS.md
+Configura `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASS` en el
+servicio. Importa `bd_redytelca_schema.sql` y después
+`bd_redytelca_seed.sql` en la base MySQL una sola vez. Define las variables
+`REDYTELCA_INITIAL_ADMIN_USERNAME`, `REDYTELCA_INITIAL_ADMIN_EMAIL` y
+`REDYTELCA_INITIAL_ADMIN_PASSWORD`, ejecuta `php crear_admin_inicial.php`
+desde el Shell del servicio y elimina esas variables al terminar.
+
+## Estructura
+
+- `api_*.php` — endpoints JSON del backend.
+- `conexion.php` — middleware: conexión PDO + autenticación staff/cliente.
+- `index.html` + `app.js` + `styles.css` — frontend.
+- `bd_redytelca.sql` — dump local de referencia; no se necesita para una instalación limpia.
+- `bd_redytelca_schema.sql` — DDL versionable, sin filas de clientes.
+- `bd_redytelca_seed.sql` — módulos, páginas y permisos mínimos para el rol Administrador.
+- `tests/` — harness de tests. Ejecutar: `php tests/run.php`.
+- `docs/` — documentación. Ver `docs/README.md`.
+- `AGENTS.md` — reglas operativas para agentes IA.
+- `MEMORY.md` — estado del proyecto entre sesiones.
+
+## Estado actual del proyecto
+
+Ver `MEMORY.md`. Resumen: sistema funcional en fase de correcciones post-auditoría.
+
+## Documentación
+
+Toda la documentación vive en `docs/`. Empezar por:
+
+1. `docs/README.md` — índice.
+2. `docs/AUDITORIA_2026.md` — hallazgos detectados.
+3. `docs/ROADMAP.md` — plan de correcciones.
+
+## Cómo trabajar en este proyecto
+
+Ver `docs/METODOLOGIA_DESARROLLO_IA.md`. Regla principal: cada bloque
+de trabajo tiene un plan aprobado antes de tocar código. La IA auditora
+redacta prompts, el humano los lleva a AI Studio, la IA auditora verifica
+el resultado. Los planes de bloque viven fuera del repositorio, junto a
+los documentos de continuidad.

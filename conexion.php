@@ -1,132 +1,67 @@
 <?php
 /**
- * Cabeceras CORS centralizadas. Se manejan aquí (y no repetidas en cada
- * endpoint) porque conexion.php es el único archivo que TODOS los .php
- * requieren sin excepción. Antes, auth_state.php y logout.php no tenían
- * ningún header CORS ni respondían al preflight OPTIONS: si el navegador
- * decidía enviar una petición preflight por el header custom
- * X-Session-Token, esas dos rutas la bloqueaban silenciosamente y el
- * fetch terminaba en catch(error), lo que producía un cierre de sesión
- * fantasma en cada F5.
- */
-/**
- * CORS whitelist configurable por variable de entorno (Prompt 7).
- * REDYTELCA_ALLOWED_ORIGINS acepta una lista separada por comas de
- * orígenes permitidos (ej. "http://localhost,https://redytelca.com").
- * Si la variable no está definida (caso actual: desarrollo local sin
- * Docker), se usa un fallback seguro de orígenes de desarrollo típicos
- * en vez de '*', para no bloquear el trabajo actual mientras se prepara
- * el despliegue.
+ * Cabeceras CORS centralizadas + conexión PDO + middlewares de autenticación
+ * y autorización.
  */
 $allowedOriginsEnv = getenv('REDYTELCA_ALLOWED_ORIGINS');
 $allowedOrigins = $allowedOriginsEnv !== false && trim($allowedOriginsEnv) !== ''
     ? array_map('trim', explode(',', $allowedOriginsEnv))
     : ['http://localhost', 'http://localhost:80', 'http://127.0.0.1', 'http://127.0.0.1:80'];
 
-$requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (php_sapi_name() !== 'cli') {
+    $requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-if ($requestOrigin !== '' && in_array($requestOrigin, $allowedOrigins, true)) {
-    header('Access-Control-Allow-Origin: ' . $requestOrigin);
-} elseif (empty($allowedOriginsEnv)) {
-    // Sin variable de entorno configurada y sin header Origin reconocible
-    // (ej. petición directa de curl/Postman sin header Origin): se
-    // mantiene compatibilidad con el flujo de pruebas actual del proyecto.
-    header('Access-Control-Allow-Origin: ' . $allowedOrigins[0]);
-}
+    if ($requestOrigin !== '' && in_array($requestOrigin, $allowedOrigins, true)) {
+        header('Access-Control-Allow-Origin: ' . $requestOrigin);
+    } elseif (empty($allowedOriginsEnv)) {
+        header('Access-Control-Allow-Origin: ' . $allowedOrigins[0]);
+    }
 
-header('Access-Control-Allow-Headers: Content-Type, X-Session-Token');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Vary: Origin');
+    header('Access-Control-Allow-Headers: Content-Type, X-Session-Token');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+    header('Vary: Origin');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(204);
-    exit;
-}
-
-/**
- * Configuración de conexión vía variables de entorno (necesario para
- * Docker: el host "sql204.infinityfree.com" y las credenciales del
- * hosting InfinityFree que había aquí antes solo existen en ese hosting
- * y no son alcanzables desde un contenedor local). Si las variables no
- * están definidas, se usan valores por defecto que coinciden con el
- * servicio "db" de docker-compose.yml, para que el proyecto funcione
- * out-of-the-box con `docker compose up`.
- */
-// Los valores por defecto (sin variables de entorno definidas) apuntan a
-// una instalación típica de XAMPP: MySQL en 127.0.0.1, usuario "root" sin
-// clave. Docker no depende de estos valores porque docker-compose.yml
-// siempre define DB_HOST/DB_USER/etc. explícitamente para el contenedor.
-date_default_timezone_set(getenv('APP_TIMEZONE') ?: 'America/Caracas');
-$host = getenv('DB_HOST') ?: '127.0.0.1';
-$dbname = getenv('DB_NAME') ?: 'redytelca';
-$user = getenv('DB_USER') ?: 'root';
-$pass = getenv('DB_PASS') ?: '';
-$port = getenv('DB_PORT') ?: '3306';
-$ports = [$port];
-$pdo = null;
-$connectionError = null;
-
-foreach ($ports as $port) {
-    try {
-        $pdo = new PDO("mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4", $user, $pass, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_TIMEOUT => 5,
-        ]);
-        // La hora de MySQL (NOW()) debe coincidir con la de PHP (date()); si no,
-        // las sesiones expiran mal en hostings con otra zona horaria.
-        $pdo->exec("SET time_zone = '" . date('P') . "'");
-        break;
-    } catch (PDOException $e) {
-        $connectionError = $e;
+    if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        http_response_code(204);
+        exit;
     }
 }
 
-if ($pdo === null) {
+// Fijar el runtime de PHP a UTC para alinearlo con la conexión PDO
+// (SET time_zone = '+00:00'). Sin esto, strtotime() y date() operan
+// en date.timezone de php.ini, lo que produce desfases por DST en
+// cálculos relativos (ej. '+30 days' atravesando un cambio de hora).
+date_default_timezone_set('UTC');
+
+$host = getenv('DB_HOST') ?: 'localhost';
+$port = (int) (getenv('DB_PORT') ?: 3306);
+$dbname = getenv('DB_NAME') ?: 'bd_redytelca';
+$user = getenv('DB_USER') ?: 'root';
+$pass = getenv('DB_PASS') ?: '';
+
+try {
+    $pdo = new PDO("mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4", $user, $pass);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec("SET time_zone = '+00:00'");
+} catch (PDOException $e) {
     if (php_sapi_name() !== 'cli') {
         header('Content-Type: application/json; charset=utf-8');
         http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Error de conexión con la base de datos."]);
+        echo json_encode(["status" => "error", "message" => "Error de conexión a la base de datos."]);
         exit;
     }
-    throw $connectionError;
+    throw $e;
 }
 
-/**
- * FASE 1 (pendiente resuelto) — MIGRACIÓN DE CONTRASEÑAS A password_hash():
- *
- * Hallazgo de la auditoría: `usuarios.password` se comparaba en texto
- * plano (`login.php`: `$userRow['password'] !== $password`), riesgo de
- * seguridad real ante cualquier acceso de lectura a la BD (backup, dump,
- * SQL injection residual, etc.).
- *
- * CORRECCIÓN: migración perezosa (lazy migration), patrón estándar para
- * este escenario. `verificarYMigrarPassword()` centraliza la lógica para
- * que login.php y cambiar_password.php no dupliquen el mismo criterio:
- *
- * 1. Si el valor almacenado ya tiene formato de hash reconocible por PHP
- *    (password_get_info devuelve un algo distinto de null), se verifica
- *    con password_verify() — comportamiento moderno normal.
- * 2. Si NO tiene formato de hash (contraseñas legadas en texto plano,
- *    como la semilla 'admin123'), se compara con hash_equals() (comparación
- *    de tiempo constante, evita timing attacks incluso en el fallback) y,
- *    si coincide, se re-escribe inmediatamente como hash bcrypt en la
- *    misma llamada. El usuario migra a hash de forma transparente en su
- *    siguiente login exitoso, sin necesidad de un script separado que
- *    alguien podría olvidar ejecutar.
- *
- * hashearPasswordNueva() se usa en cambiar_password.php/usuarios_crear.php
- * para que toda contraseña nueva o restablecida se guarde siempre hasheada
- * desde el origen, sin excepción.
- */
 function verificarYMigrarPassword(PDO $pdo, string $passwordIngresada, string $passwordAlmacenada, int $idUsuario): bool {
     $infoHash = password_get_info($passwordAlmacenada);
 
     if ($infoHash['algo'] !== null && $infoHash['algo'] !== 0) {
-        // Ya es un hash reconocido (bcrypt/argon2) -> verificación moderna.
         return password_verify($passwordIngresada, $passwordAlmacenada);
     }
 
-    // Contraseña legada en texto plano: comparación de tiempo constante.
     if (hash_equals($passwordAlmacenada, $passwordIngresada)) {
         $nuevoHash = password_hash($passwordIngresada, PASSWORD_DEFAULT);
         $stmt = $pdo->prepare('UPDATE usuarios SET password = ? WHERE id_usuario = ?');
@@ -142,23 +77,45 @@ function hashearPasswordNueva(string $passwordPlana): string {
 }
 
 /**
- * FASE 4 (middleware centralizado): auditoría de seguridad — el RBAC de
- * interfaz en app.js solo controla la UX y puede ser forzado por Postman;
- * por eso se centraliza aquí la validación real de sesión para staff y para
- * clientes. La intención es evitar duplicar la misma lógica en cada endpoint
- * y permitir que cualquier archivo nuevo la invoque desde una sola función
- * reutilizable, en vez de repetir el mismo patrón de lectura de token,
- * JOIN a sesiones y verificación de expiración en 3 o 4 rutas distintas.
+ * Establece el contexto de auditoría en la conexión PDO actual.
+ * Las variables @app_* son por conexión. Este proyecto NO usa PDO::ATTR_PERSISTENT.
+ * Si algún día se habilita persistencia, hay que resetear las variables al abrir la conexión.
  */
-function requireStaffAuth(PDO $pdo, ?int $minRoleId = null): array {
+function setAuditContext(PDO $pdo, string $tipoActor, ?int $idUsuario, ?int $idCredencial): void {
+    if ($tipoActor !== 'staff' && $tipoActor !== 'cliente') {
+        throw new InvalidArgumentException("tipoActor debe ser 'staff' o 'cliente'");
+    }
+    
+    $u = $idUsuario !== null ? intval($idUsuario) : 'NULL';
+    $c = $idCredencial !== null ? intval($idCredencial) : 'NULL';
+    $t = $pdo->quote($tipoActor);
+    
+    $pdo->exec("SET @app_usuario_id = $u, @app_credencial_id = $c, @app_tipo_actor = $t");
+}
+
+function loadUserRoles(PDO $pdo, int $idUsuario): array {
+    if ($idUsuario <= 0) {
+        return [];
+    }
+    $stmt = $pdo->prepare("SELECT id_rol FROM usuario_rol WHERE id_usuario = ? ORDER BY id_rol");
+    $stmt->execute([$idUsuario]);
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN, 0));
+}
+
+function loadUserRoleNames(PDO $pdo, int $idUsuario): array {
+    if ($idUsuario <= 0) {
+        return [];
+    }
+    $stmt = $pdo->prepare("SELECT r.nombre_rol FROM usuario_rol ur INNER JOIN rol r ON r.id_rol = ur.id_rol WHERE ur.id_usuario = ? ORDER BY r.id_rol");
+    $stmt->execute([$idUsuario]);
+    return $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
+}
+
+function requireStaffAuth(PDO $pdo, ?int $minRoleId = null, bool $allowMustChangePassword = false): array {
     $token = null;
 
     if (isset($_SERVER['HTTP_X_SESSION_TOKEN']) && trim((string) $_SERVER['HTTP_X_SESSION_TOKEN']) !== '') {
         $token = trim((string) $_SERVER['HTTP_X_SESSION_TOKEN']);
-    } elseif (isset($_GET['token']) && trim((string) $_GET['token']) !== '') {
-        $token = trim((string) $_GET['token']);
-    } elseif (isset($_POST['token']) && trim((string) $_POST['token']) !== '') {
-        $token = trim((string) $_POST['token']);
     }
 
     if ($token === null || $token === '') {
@@ -167,7 +124,7 @@ function requireStaffAuth(PDO $pdo, ?int $minRoleId = null): array {
         exit;
     }
 
-    $stmt = $pdo->prepare("SELECT s.id_sesion, s.id_usuario, u.username, u.id_rol
+    $stmt = $pdo->prepare("SELECT s.id_sesion, s.id_usuario, u.username, u.must_change_password
         FROM sesiones s
         INNER JOIN usuarios u ON u.id_usuario = s.id_usuario
         WHERE s.token = ?
@@ -182,47 +139,84 @@ function requireStaffAuth(PDO $pdo, ?int $minRoleId = null): array {
         exit;
     }
 
-    $roleId = (int) $sesion['id_rol'];
-    if ($minRoleId !== null && $roleId > $minRoleId) {
+    $mustChangePassword = (int) ($sesion['must_change_password'] ?? 0) === 1;
+    if ($mustChangePassword && !$allowMustChangePassword) {
         http_response_code(403);
-        echo json_encode(['status' => 'error', 'message' => 'No tienes permisos suficientes para esta acción.']);
+        echo json_encode(['status' => 'error', 'message' => 'Debes cambiar tu contraseña antes de continuar.']);
         exit;
     }
 
+    $idUsuario = (int) $sesion['id_usuario'];
+    $stmtRoles = $pdo->prepare("SELECT id_rol FROM usuario_rol WHERE id_usuario = ? ORDER BY id_rol");
+    $stmtRoles->execute([$idUsuario]);
+    $roles = array_map('intval', $stmtRoles->fetchAll(PDO::FETCH_COLUMN, 0));
+
+    if (empty($roles)) {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'message' => 'Tu cuenta no tiene roles asignados. Contacta a un Administrador.']);
+        exit;
+    }
+
+    if ($minRoleId !== null) {
+        $hasMinRole = false;
+        foreach ($roles as $r) {
+            if ($r <= $minRoleId) {
+                $hasMinRole = true;
+                break;
+            }
+        }
+        if (!$hasMinRole) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'No tienes permisos suficientes para esta acción.']);
+            exit;
+        }
+    }
+
+    setAuditContext($pdo, 'staff', $idUsuario, null);
+
     return [
-        'id_usuario' => (int) $sesion['id_usuario'],
-        'id_rol' => $roleId,
+        'id_usuario' => $idUsuario,
         'username' => $sesion['username'],
+        'roles' => $roles,
+        'es_admin' => in_array(1, $roles, true),
+        'must_change_password' => $mustChangePassword,
     ];
 }
 
-/**
- * PROMPT 14 — Autorización DINÁMICA basada en rol_modulo_pagina, no en un
- * id_rol hardcodeado. Corrige la regresión de Prompt 13: aquel prompt cerró
- * un hueco de seguridad real (endpoints sin ninguna restricción de rol)
- * usando requireStaffAuth($pdo, 1), lo cual congeló la autorización en el
- * código PHP e hizo que la configuración de Configuración > Permisos dejara
- * de tener efecto sobre esos endpoints — contradiciendo el principio de que
- * TODO lo relacionado a permisos debe ser configurable por el Admin desde
- * la UI, no desde una constante en el código.
- *
- * Esta función consulta la MISMA tabla que ya usa auth_state.php::
- * loadAllowedViews() para decidir qué ve cada rol en el sidebar. Así, el
- * backend y el frontend comparten una única fuente de verdad: si el Admin
- * marca una página para un rol en Configuración > Permisos, ese rol pasa a
- * poder usar el endpoint correspondiente sin ningún cambio de código;  si
- * el Admin la desmarca, el endpoint empieza a rechazar en la siguiente
- * petición, sin necesidad de forzar logout (la tabla se consulta en vivo,
- * igual que auth_state.php ya hace en cada polling de 15s).
- */
 function requirePageAccess(PDO $pdo, string $urlPagina): array {
     $staffSession = requireStaffAuth($pdo);
 
-    $stmt = $pdo->prepare("SELECT rmp.id_rmp
-        FROM rol_modulo_pagina rmp
-        INNER JOIN paginas p ON p.id_pagina = rmp.id_pagina
-        WHERE rmp.id_rol = ? AND p.url_pagina = ?");
-    $stmt->execute([$staffSession['id_rol'], $urlPagina]);
+    // GUARD SoD Configuración (RBAC-02):
+    // El módulo Configuración (id_modulo = 4) está reservado al rol
+    // Administrador (id_rol = 1). El guard actúa ANTES de la consulta
+    // de visibilidad, independientemente de lo que diga el seed o la
+    // matriz de permisos. Fundamento: Google Cloud IAM Deny Policies +
+    // NIST SP 800-53 AC-5 (Separación de Funciones).
+    $stmtModuloSoD = $pdo->prepare("SELECT id_modulo FROM paginas WHERE url_pagina = ?");
+    $stmtModuloSoD->execute([$urlPagina]);
+    $idModuloPaginaSoD = $stmtModuloSoD->fetchColumn();
+
+    if ((int) $idModuloPaginaSoD === 4 && !in_array(1, $staffSession['roles'], true)) {
+        http_response_code(403);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Acceso denegado. La gestión de la configuración del sistema está reservada exclusivamente al rol Administrador por políticas de Separación de Funciones (SoD).'
+        ]);
+        exit;
+    }
+
+    // Consulta rol_modulo_pagina (nivel 1 de RBAC dos niveles, spec 099)
+    $placeholders = implode(',', array_fill(0, count($staffSession['roles']), '?'));
+    $sql = "SELECT 1 
+            FROM rol_modulo_pagina rmpag
+            INNER JOIN rol_modulo rm ON rm.id_rol_modulo = rmpag.id_rol_modulo
+            INNER JOIN paginas p ON p.id_pagina = rmpag.id_pagina
+            WHERE rm.id_rol IN ($placeholders) AND p.url_pagina = ?
+            LIMIT 1";
+    
+    $params = array_merge($staffSession['roles'], [$urlPagina]);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
 
     if (!$stmt->fetch()) {
         http_response_code(403);
@@ -236,15 +230,39 @@ function requirePageAccess(PDO $pdo, string $urlPagina): array {
     return $staffSession;
 }
 
+function requireOperation(PDO $pdo, string $urlPagina, string $operacion): array {
+    $staffSession = requireStaffAuth($pdo);
+
+    $placeholders = implode(',', array_fill(0, count($staffSession['roles']), '?'));
+    $sql = "SELECT 1 
+            FROM rol_modulo_permiso rmp
+            INNER JOIN rol_modulo rm ON rm.id_rol_modulo = rmp.id_rol_modulo
+            INNER JOIN paginas p ON p.id_pagina = rmp.id_pagina
+            INNER JOIN permisos pe ON pe.id_permiso = rmp.id_permiso
+            WHERE rm.id_rol IN ($placeholders) AND p.url_pagina = ? AND pe.nombre = ?
+            LIMIT 1";
+    
+    $params = array_merge($staffSession['roles'], [$urlPagina, $operacion]);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    if (!$stmt->fetch()) {
+        http_response_code(403);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Tu rol no tiene el permiso "' . $operacion . '" sobre esta página. Pide a un Administrador que lo active desde Configuración > Permisos.'
+        ]);
+        exit;
+    }
+
+    return $staffSession;
+}
+
 function requireClientAuth(PDO $pdo): array {
     $token = null;
 
     if (isset($_SERVER['HTTP_X_SESSION_TOKEN']) && trim((string) $_SERVER['HTTP_X_SESSION_TOKEN']) !== '') {
         $token = trim((string) $_SERVER['HTTP_X_SESSION_TOKEN']);
-    } elseif (isset($_GET['token']) && trim((string) $_GET['token']) !== '') {
-        $token = trim((string) $_GET['token']);
-    } elseif (isset($_POST['token']) && trim((string) $_POST['token']) !== '') {
-        $token = trim((string) $_POST['token']);
     }
 
     if ($token === null || $token === '') {
@@ -268,9 +286,20 @@ function requireClientAuth(PDO $pdo): array {
         exit;
     }
 
+    $idCredencial = (int) $sesion['id_credencial'];
+    setAuditContext($pdo, 'cliente', null, $idCredencial);
+
     return [
-        'id_credencial' => (int) $sesion['id_credencial'],
+        'id_credencial' => $idCredencial,
         'id_cliente' => (int) $sesion['id_cliente'],
     ];
 }
-?>
+
+// ============================================================================
+// CAMBIOS APLICADOS EN ESTA REVISIÓN
+// ============================================================================
+// Se agregaron las funciones loadUserRoles() y loadUserRoleNames() para
+// resolver fatal errors en api_perfil.php, usuarios_editar.php y
+// usuarios_eliminar.php al consultar los roles del usuario en el nuevo
+// esquema RBAC N:M (usuario_rol).
+// ============================================================================

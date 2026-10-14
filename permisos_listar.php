@@ -1,70 +1,93 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
-requireStaffAuth($pdo);
+requirePageAccess($pdo, 'permisos');
+requireOperation($pdo, 'permisos', 'leer');
 
 $id_rol = isset($_GET['id_rol']) ? intval($_GET['id_rol']) : 0;
 
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `modulos` (
-        `id_modulo` INT(11) NOT NULL AUTO_INCREMENT,
-        `nombre_modulo` VARCHAR(50) NOT NULL,
-        PRIMARY KEY (`id_modulo`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+// Catálogo completo de permisos (leer, crear, editar, eliminar, validar)
+$stmtPermisos = $pdo->query("SELECT id_permiso, nombre FROM permisos ORDER BY id_permiso");
+$permisosCatalogo = $stmtPermisos->fetchAll(PDO::FETCH_ASSOC);
 
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `paginas` (
-        `id_pagina` INT(11) NOT NULL AUTO_INCREMENT,
-        `nombre_pagina` VARCHAR(100) NOT NULL,
-        `url_pagina` VARCHAR(255) NOT NULL,
-        `id_modulo` INT(11) NOT NULL,
-        PRIMARY KEY (`id_pagina`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `rol_modulo_pagina` (
-        `id_rmp` INT(11) NOT NULL AUTO_INCREMENT,
-        `id_rol` INT(11) NOT NULL,
-        `id_modulo` INT(11) NOT NULL,
-        `id_pagina` INT(11) NOT NULL,
-        PRIMARY KEY (`id_rmp`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-    // Páginas ya asignadas a este rol (para marcar los checkbox como asignado)
-    $asignadas = [];
-    if ($id_rol > 0) {
-        $stmtAsig = $pdo->prepare("SELECT id_pagina FROM rol_modulo_pagina WHERE id_rol = ?");
-        $stmtAsig->execute([$id_rol]);
-        $asignadas = array_map('intval', $stmtAsig->fetchAll(PDO::FETCH_COLUMN, 0));
+// Nivel 1 — Visibilidad (RBAC dos niveles).
+// Páginas que el rol puede VER. Fuente: rol_modulo_pagina.
+// Independiente de los permisos de operación (nivel 2).
+$visibles = [];
+if ($id_rol > 0) {
+    $stmtVis = $pdo->prepare("
+        SELECT rmpag.id_pagina
+        FROM rol_modulo_pagina rmpag
+        INNER JOIN rol_modulo rm ON rm.id_rol_modulo = rmpag.id_rol_modulo
+        WHERE rm.id_rol = ?
+    ");
+    $stmtVis->execute([$id_rol]);
+    foreach ($stmtVis->fetchAll(PDO::FETCH_COLUMN, 0) as $idPag) {
+        $visibles[(int) $idPag] = true;
     }
+}
 
-    // Universo completo de módulos/páginas del sistema, para poder asignar
-    // vistas nuevas a un rol aunque todavía no tenga ninguna asignada.
-    $stmt = $pdo->query("SELECT m.id_modulo, m.nombre_modulo, p.id_pagina, p.nombre_pagina, p.url_pagina
-        FROM modulos m
-        INNER JOIN paginas p ON p.id_modulo = m.id_modulo
-        ORDER BY m.id_modulo, p.id_pagina");
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $modulos = [];
-    foreach ($rows as $row) {
-        $idModulo = (int) $row['id_modulo'];
-        if (!isset($modulos[$idModulo])) {
-            $modulos[$idModulo] = [
-                'id_modulo' => $idModulo,
-                'nombre_modulo' => $row['nombre_modulo'],
-                'vistas' => []
-            ];
+// Permisos ya asignados al rol: mapa [id_pagina][id_permiso] = true
+$asignados = [];
+if ($id_rol > 0) {
+    $stmtAsig = $pdo->prepare("
+        SELECT rmp.id_pagina, rmp.id_permiso
+        FROM rol_modulo_permiso rmp
+        INNER JOIN rol_modulo rm ON rm.id_rol_modulo = rmp.id_rol_modulo
+        WHERE rm.id_rol = ?
+    ");
+    $stmtAsig->execute([$id_rol]);
+    foreach ($stmtAsig->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $idPag = (int) $row['id_pagina'];
+        $idPer = (int) $row['id_permiso'];
+        if (!isset($asignados[$idPag])) {
+            $asignados[$idPag] = [];
         }
-        $idPagina = (int) $row['id_pagina'];
-        $modulos[$idModulo]['vistas'][] = [
-            'id_pagina' => $idPagina,
-            'nombre_pagina' => $row['nombre_pagina'],
-            'url_pagina' => $row['url_pagina'],
-            'asignado' => in_array($idPagina, $asignadas, true)
+        $asignados[$idPag][$idPer] = true;
+    }
+}
+
+// Universo completo de módulos/páginas
+$stmt = $pdo->query("SELECT m.id_modulo, m.nombre_modulo, p.id_pagina, p.nombre_pagina, p.url_pagina
+    FROM modulos m
+    INNER JOIN paginas p ON p.id_modulo = m.id_modulo
+    ORDER BY m.id_modulo, p.id_pagina");
+$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$modulos = [];
+foreach ($rows as $row) {
+    $idModulo = (int) $row['id_modulo'];
+    if (!isset($modulos[$idModulo])) {
+        $modulos[$idModulo] = [
+            'id_modulo' => $idModulo,
+            'nombre_modulo' => $row['nombre_modulo'],
+            'vistas' => []
+        ];
+    }
+    $idPagina = (int) $row['id_pagina'];
+
+    // Permisos asignados a esta página para este rol
+    $permisosPagina = [];
+    foreach ($permisosCatalogo as $perm) {
+        $idPer = (int) $perm['id_permiso'];
+        $permisosPagina[] = [
+            'id_permiso' => $idPer,
+            'nombre' => $perm['nombre'],
+            'asignado' => isset($asignados[$idPagina][$idPer])
         ];
     }
 
-    echo json_encode(['status' => 'success', 'modulos' => array_values($modulos)]);
-} catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    $modulos[$idModulo]['vistas'][] = [
+        'id_pagina' => $idPagina,
+        'nombre_pagina' => $row['nombre_pagina'],
+        'url_pagina' => $row['url_pagina'],
+        'visible' => isset($visibles[$idPagina]),
+        'permisos' => $permisosPagina
+    ];
 }
+
+echo json_encode([
+    'status' => 'success',
+    'modulos' => array_values($modulos),
+    'permisos_catalogo' => $permisosCatalogo
+]);

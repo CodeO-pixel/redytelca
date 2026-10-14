@@ -1,7 +1,7 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
-requirePageAccess($pdo, 'clientes');
+requirePageAccess($pdo, 'servicios');
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -18,13 +18,8 @@ $method = $_SERVER['REQUEST_METHOD'];
  * cada uno con su propio plan, NAP y estado comercial.
  */
 
-try {
-    $pdo->exec("INSERT IGNORE INTO planes (id_plan, nombre, velocidad, precio_mensual, moneda)
-                VALUES (1, 'Plan Básico', '10 Mbps', 15.00, 'USD')");
-} catch (Exception $e) {
-}
-
 if ($method === 'GET') {
+    requireOperation($pdo, 'servicios', 'leer');
     $idCliente = isset($_GET['id_cliente']) ? (int) $_GET['id_cliente'] : 0;
 
     $where = '';
@@ -61,6 +56,7 @@ if (!$input) {
 }
 
 if ($method === 'POST') {
+    requireOperation($pdo, 'servicios', 'crear');
     $idCliente = (int) ($input['id_cliente'] ?? 0);
     $alias = trim($input['alias'] ?? '');
     $direccionTexto = trim($input['direccion_texto'] ?? '');
@@ -100,14 +96,21 @@ if ($method === 'POST') {
     }
 
     try {
-        $stmt = $pdo->prepare("INSERT INTO servicios (id_cliente, alias, estado_comercial, id_plan, id_naps, direccion_texto, latitud_instalacion, longitud_instalacion)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-        $ok = $stmt->execute([$idCliente, $alias ?: null, $estadoComercial, $idPlan, $idNap, $direccionTexto, $latitud, $longitud]);
+        $ipAsignada = isset($input['ip_asignada']) ? trim($input['ip_asignada']) : null;
+        if ($ipAsignada === '') {
+            $ipAsignada = null;
+        }
+
+        $stmt = $pdo->prepare("INSERT INTO servicios (id_cliente, alias, estado_comercial, id_plan, id_naps, direccion_texto, latitud_instalacion, longitud_instalacion, ip_asignada)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $ok = $stmt->execute([$idCliente, $alias ?: null, $estadoComercial, $idPlan, $idNap, $direccionTexto, $latitud, $longitud, $ipAsignada]);
         echo json_encode(['status' => $ok ? 'success' : 'error', 'message' => $ok ? 'Servicio añadido correctamente' : 'No se pudo crear el servicio']);
     } catch (PDOException $e) {
         $sqlCode = (int) ($e->errorInfo[1] ?? 0);
         if ($sqlCode === 1452) {
             echo json_encode(['status' => 'error', 'message' => 'El plan o la NAP seleccionados no son válidos.']);
+        } elseif ($sqlCode === 1644) {
+            echo json_encode(['status' => 'error', 'message' => $e->errorInfo[2] ?: 'No se puede crear el servicio con ese estado inicial.']);
         } else {
             echo json_encode(['status' => 'error', 'message' => 'Error creando el servicio: ' . $e->getMessage()]);
         }
@@ -116,6 +119,7 @@ if ($method === 'POST') {
 }
 
 if ($method === 'PUT') {
+    requireOperation($pdo, 'servicios', 'editar');
     $id = (int) ($input['id_servicio'] ?? 0);
     if ($id <= 0) {
         echo json_encode(['status' => 'error', 'message' => 'Servicio inválido']);
@@ -153,13 +157,20 @@ if ($method === 'PUT') {
     }
 
     try {
-        $stmt = $pdo->prepare("UPDATE servicios SET alias = ?, estado_comercial = ?, id_plan = ?, id_naps = ?, direccion_texto = ?, latitud_instalacion = ?, longitud_instalacion = ? WHERE id_servicio = ?");
-        $ok = $stmt->execute([$alias ?: null, $estadoComercial, $idPlan, $idNap, $direccionTexto, $latitud, $longitud, $id]);
+        $ipAsignada = isset($input['ip_asignada']) ? trim($input['ip_asignada']) : null;
+        if ($ipAsignada === '') {
+            $ipAsignada = null;
+        }
+
+        $stmt = $pdo->prepare("UPDATE servicios SET alias = ?, estado_comercial = ?, id_plan = ?, id_naps = ?, direccion_texto = ?, latitud_instalacion = ?, longitud_instalacion = ?, ip_asignada = ? WHERE id_servicio = ?");
+        $ok = $stmt->execute([$alias ?: null, $estadoComercial, $idPlan, $idNap, $direccionTexto, $latitud, $longitud, $ipAsignada, $id]);
         echo json_encode(['status' => $ok ? 'success' : 'error', 'message' => $ok ? 'Servicio actualizado' : 'No se pudo actualizar']);
     } catch (PDOException $e) {
         $sqlCode = (int) ($e->errorInfo[1] ?? 0);
         if ($sqlCode === 1452) {
             echo json_encode(['status' => 'error', 'message' => 'El plan o la NAP seleccionados no son válidos.']);
+        } elseif ($sqlCode === 1644) {
+            echo json_encode(['status' => 'error', 'message' => $e->errorInfo[2] ?: 'La transición de estado no es válida para este servicio.']);
         } else {
             echo json_encode(['status' => 'error', 'message' => 'Error actualizando el servicio: ' . $e->getMessage()]);
         }
@@ -168,6 +179,7 @@ if ($method === 'PUT') {
 }
 
 if ($method === 'DELETE') {
+    requireOperation($pdo, 'servicios', 'eliminar');
     $id = (int) ($_GET['id'] ?? 0);
     if ($id <= 0) {
         echo json_encode(['status' => 'error', 'message' => 'Servicio inválido']);

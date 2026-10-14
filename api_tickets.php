@@ -1,11 +1,13 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 require 'conexion.php';
-$staffSession = requirePageAccess($pdo, 'tickets');
+requirePageAccess($pdo, 'tickets');
 
 $method = $_SERVER['REQUEST_METHOD'];
+// Auto-reparación de esquema eliminada (Prompt 5): bd_redytelca.sql es la fuente de verdad desde Fase 0, este bloque siempre resolvía a no-op.
 
 if ($method === 'GET') {
+    requireOperation($pdo, 'tickets', 'leer');
     $stmt = $pdo->query("SELECT t.*, c.nombres, c.apellidos, u.username AS creador FROM tickets t LEFT JOIN clientes c ON c.id_cliente = t.id_cliente LEFT JOIN usuarios u ON u.id_usuario = t.id_usuario_creador ORDER BY t.creado_en DESC");
     echo json_encode(['status' => 'success', 'tickets' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
     exit;
@@ -17,40 +19,47 @@ if (!$input) {
 }
 
 if ($method === 'POST') {
+    requireOperation($pdo, 'tickets', 'crear');
     $asunto = trim($input['asunto'] ?? '');
     $descripcion = trim($input['descripcion'] ?? '');
     $estado = trim($input['estado'] ?? 'Abierto');
     $prioridad = trim($input['prioridad'] ?? 'Media');
     $id_cliente = (isset($input['id_cliente']) && $input['id_cliente'] !== '' && $input['id_cliente'] !== null) ? (int)$input['id_cliente'] : null;
-    $id_usuario_creador = (int) $staffSession['id_usuario'];
+    $id_usuario_creador = (isset($input['id_usuario_creador']) && $input['id_usuario_creador'] !== '' && $input['id_usuario_creador'] !== null) ? (int)$input['id_usuario_creador'] : null;
+    $origen = trim($input['origen'] ?? 'backoffice');
+    if ($origen !== 'portal_cliente' && $origen !== 'backoffice') {
+        $origen = 'backoffice';
+    }
 
     if ($asunto === '') {
         echo json_encode(['status' => 'error', 'message' => 'El asunto es obligatorio']);
         exit;
     }
 
-    $stmt = $pdo->prepare("INSERT INTO tickets (asunto, descripcion, estado, prioridad, id_cliente, id_usuario_creador) VALUES (?, ?, ?, ?, ?, ?)");
-    $ok = $stmt->execute([$asunto, $descripcion, $estado, $prioridad, $id_cliente, $id_usuario_creador]);
+    $stmt = $pdo->prepare("INSERT INTO tickets (asunto, descripcion, estado, prioridad, id_cliente, id_usuario_creador, origen) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $ok = $stmt->execute([$asunto, $descripcion, $estado, $prioridad, $id_cliente, $id_usuario_creador, $origen]);
 
     echo json_encode(['status' => $ok ? 'success' : 'error', 'message' => $ok ? 'Ticket creado correctamente' : 'No se pudo crear el ticket']);
     exit;
 }
 
 if ($method === 'PUT') {
+    requireOperation($pdo, 'tickets', 'editar');
     $id = (int)($input['id_ticket'] ?? 0);
-    $asunto = trim($input['asunto'] ?? '');
-    if ($asunto === '') {
-        echo json_encode(['status' => 'error', 'message' => 'El asunto no puede estar vacío']);
-        exit;
+    $origen = trim($input['origen'] ?? 'backoffice');
+    if ($origen !== 'portal_cliente' && $origen !== 'backoffice') {
+        $origen = 'backoffice';
     }
 
-    $stmt = $pdo->prepare("UPDATE tickets SET asunto = ?, descripcion = ?, estado = ?, prioridad = ?, id_cliente = ? WHERE id_ticket = ?");
+    $stmt = $pdo->prepare("UPDATE tickets SET asunto = ?, descripcion = ?, estado = ?, prioridad = ?, id_cliente = ?, id_usuario_creador = ?, origen = ? WHERE id_ticket = ?");
     $ok = $stmt->execute([
-        $asunto,
+        trim($input['asunto'] ?? ''),
         trim($input['descripcion'] ?? ''),
         trim($input['estado'] ?? 'Abierto'),
         trim($input['prioridad'] ?? 'Media'),
         (isset($input['id_cliente']) && $input['id_cliente'] !== '' && $input['id_cliente'] !== null) ? (int)$input['id_cliente'] : null,
+        (isset($input['id_usuario_creador']) && $input['id_usuario_creador'] !== '' && $input['id_usuario_creador'] !== null) ? (int)$input['id_usuario_creador'] : null,
+        $origen,
         $id
     ]);
     echo json_encode(['status' => $ok ? 'success' : 'error', 'message' => $ok ? 'Ticket actualizado' : 'No se pudo actualizar']);
@@ -58,6 +67,7 @@ if ($method === 'PUT') {
 }
 
 if ($method === 'DELETE') {
+    requireOperation($pdo, 'tickets', 'eliminar');
     $id = (int)($_GET['id'] ?? 0);
     $stmt = $pdo->prepare("DELETE FROM tickets WHERE id_ticket = ?");
     $ok = $stmt->execute([$id]);
